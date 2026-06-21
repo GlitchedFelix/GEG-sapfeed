@@ -52,7 +52,7 @@ export default function SearchClient() {
   // visible in the table — no drift between "what you see" and "what
   // the stats describe".
   const applyFilters = useCallback(
-    (query: ReturnType<typeof supabase.from>) => {
+    (query: any) => {
       let q = query as any
       if (brand !== 'ALL') q = q.eq('brand', brand)
       if (dateFrom) q = q.gte('delivery_date', dateFrom)
@@ -95,7 +95,7 @@ export default function SearchClient() {
 
     if (!statsError && statsRows) {
       const s = statsRows.reduce(
-        (acc, r: any) => ({
+        (acc: Stats, r: any) => ({
           deliveryCount: acc.deliveryCount + 1,
           totalTransport1: acc.totalTransport1 + (r.transport1_amount_zar || 0),
           totalTransport2: acc.totalTransport2 + (r.transport2_amount_zar || 0),
