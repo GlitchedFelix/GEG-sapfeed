@@ -141,12 +141,12 @@ function hashRow(cells: string[]): string {
  * SAP won't silently corrupt data — it'll just fail to find the column
  * and throw, which is the safer failure mode.
  */
-export function parseSapExport(raw: string, filename: string): {
+export function parseSapExport(raw: string, filename: string, brandOverride?: Brand): {
   brand: Brand
   records: DeliveryRecord[]
   errors: string[]
 } {
-  const brand = detectBrand(filename)
+  const brand = brandOverride ?? detectBrand(filename)
   const html = extractHtmlFromMhtml(raw)
   const tables = html.split(/<table/i).slice(1).map((t) => parseHtmlTable('<table' + t))
 
