@@ -48,21 +48,22 @@ export async function POST(request: NextRequest) {
   // were skipped).
   const incomingHashes = parsed.records.map((r) => r.row_hash)
 
-  const { data: existing, error: existingError } = await supabase
-    .from('deliveries')
-    .select('row_hash')
-    .in('row_hash', incomingHashes)
-
-  if (existingError) {
-    return NextResponse.json({ error: existingError.message }, { status: 500 })
+  const existingHashSet = new Set<string>()
+  const BATCH = 100
+  for (let i = 0; i < incomingHashes.length; i += BATCH) {
+    const { data: existing, error: existingError } = await supabase
+      .from('deliveries')
+      .select('row_hash')
+      .in('row_hash', incomingHashes.slice(i, i + BATCH))
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 })
+    }
+    for (const r of existing || []) existingHashSet.add(r.row_hash)
   }
-
-  const existingHashSet = new Set((existing || []).map((r) => r.row_hash))
   const newRecords = parsed.records.filter((r) => !existingHashSet.has(r.row_hash))
   const duplicateCount = parsed.records.length - newRecords.length
 
   let insertedCount = 0
-  const BATCH = 100
   for (let i = 0; i < newRecords.length; i += BATCH) {
     const batch = newRecords.slice(i, i + BATCH).map((r) => ({ ...r, imported_by: user.id }))
     const { error: insertError, count } = await supabase
