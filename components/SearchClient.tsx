@@ -23,6 +23,8 @@ export default function SearchClient() {
   const [brand, setBrand] = useState<Brand | 'ALL'>('ALL')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [createdFrom, setCreatedFrom] = useState('')
+  const [createdTo, setCreatedTo] = useState('')
   const [storeFilter, setStoreFilter] = useState('')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -55,13 +57,15 @@ export default function SearchClient() {
     (query: any) => {
       let q = query as any
       if (brand !== 'ALL') q = q.eq('brand', brand)
+      if (createdFrom) q = q.gte('created_on', createdFrom)
+      if (createdTo) q = q.lte('created_on', createdTo)
       if (dateFrom) q = q.gte('delivery_date', dateFrom)
       if (dateTo) q = q.lte('delivery_date', dateTo)
       if (storeFilter) q = q.eq('store_code', storeFilter)
       if (debouncedSearch) q = q.ilike('search_blob', `%${debouncedSearch.toLowerCase()}%`)
       return q
     },
-    [brand, dateFrom, dateTo, storeFilter, debouncedSearch]
+    [brand, createdFrom, createdTo, dateFrom, dateTo, storeFilter, debouncedSearch]
   )
 
   const fetchData = useCallback(async () => {
@@ -286,23 +290,50 @@ export default function SearchClient() {
 
         {/* Date + store filters */}
         <div className="flex items-end gap-2">
-          <div>
-            <label className="mb-0.5 block text-xs text-slate-400">From</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
-            />
+          {/* Created On range */}
+          <div className="flex items-end gap-1">
+            <div>
+              <label className="mb-0.5 block text-xs text-slate-400">Created On From</label>
+              <input
+                type="date"
+                value={createdFrom}
+                onChange={(e) => setCreatedFrom(e.target.value)}
+                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-slate-400">To</label>
+              <input
+                type="date"
+                value={createdTo}
+                onChange={(e) => setCreatedTo(e.target.value)}
+                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              />
+            </div>
           </div>
-          <div>
-            <label className="mb-0.5 block text-xs text-slate-400">To</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
-            />
+
+          <div className="h-4 w-px bg-slate-200" />
+
+          {/* Delivery Date range */}
+          <div className="flex items-end gap-1">
+            <div>
+              <label className="mb-0.5 block text-xs text-slate-400">Delivery Date From</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-slate-400">To</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              />
+            </div>
           </div>
           <div>
             <label className="mb-0.5 block text-xs text-slate-400">Store</label>
@@ -329,9 +360,11 @@ export default function SearchClient() {
               className="w-56 rounded border border-slate-300 px-1.5 py-1 text-xs"
             />
           </div>
-          {(dateFrom || dateTo || storeFilter || search) && (
+          {(createdFrom || createdTo || dateFrom || dateTo || storeFilter || search) && (
             <button
               onClick={() => {
+                setCreatedFrom('')
+                setCreatedTo('')
                 setDateFrom('')
                 setDateTo('')
                 setStoreFilter('')
