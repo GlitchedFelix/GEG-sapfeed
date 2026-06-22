@@ -42,7 +42,7 @@ function checkForSapEmails() {
   // Search for unread emails with "Transport" in the subject that haven't been processed yet.
   // Handles both "Transport - ItalTile" and "Transport" (CTM) subjects.
   // Also handles Outlook auto-forwards that may prepend "FW: " to the subject.
-  var threads = GmailApp.search('subject:Transport is:unread -label:' + LABEL_NAME);
+  var threads = GmailApp.search('from:saphelpdesk@italtile.co.za subject:Transport is:unread -label:' + LABEL_NAME);
 
   var processedToday = 0;
 
