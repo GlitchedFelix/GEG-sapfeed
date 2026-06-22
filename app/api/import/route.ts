@@ -62,18 +62,17 @@ export async function POST(request: NextRequest) {
   const duplicateCount = parsed.records.length - newRecords.length
 
   let insertedCount = 0
-  if (newRecords.length > 0) {
+  const BATCH = 100
+  for (let i = 0; i < newRecords.length; i += BATCH) {
+    const batch = newRecords.slice(i, i + BATCH).map((r) => ({ ...r, imported_by: user.id }))
     const { error: insertError, count } = await supabase
       .from('deliveries')
-      .insert(
-        newRecords.map((r) => ({ ...r, imported_by: user.id })),
-        { count: 'exact' }
-      )
+      .insert(batch, { count: 'exact' })
 
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
-    insertedCount = count ?? newRecords.length
+    insertedCount += count ?? batch.length
   }
 
   const result: ImportResult = {
