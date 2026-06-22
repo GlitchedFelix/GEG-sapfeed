@@ -89,27 +89,29 @@ export default function SearchClient() {
     setRows((data as DeliveryRecord[]) || [])
     setTotalCount(count || 0)
 
-    // Stats are computed via a Postgres aggregate query (not by summing
-    // the current page client-side) so they reflect ALL matching rows
-    // across every page, not just the 50 visible right now.
-    const statsQuery = applyFilters(
-      supabase.from('deliveries').select('transport1_amount_zar, transport2_amount_zar, gross_weight_kg, net_weight_kg')
-    )
-    const { data: statsRows, error: statsError } = await statsQuery
-
-    if (!statsError && statsRows) {
-      const s = statsRows.reduce(
-        (acc: Stats, r: any) => ({
-          deliveryCount: acc.deliveryCount + 1,
-          totalTransport1: acc.totalTransport1 + (r.transport1_amount_zar || 0),
-          totalTransport2: acc.totalTransport2 + (r.transport2_amount_zar || 0),
-          totalGrossWeight: acc.totalGrossWeight + (r.gross_weight_kg || 0),
-          totalNetWeight: acc.totalNetWeight + (r.net_weight_kg || 0),
-        }),
-        { deliveryCount: 0, totalTransport1: 0, totalTransport2: 0, totalGrossWeight: 0, totalNetWeight: 0 }
-      )
-      setStats(s)
+    // Stats must cover ALL matching rows, not just the current page.
+    // Supabase caps un-ranged queries at 1000 rows, so we page through
+    // in batches of 1000 (same pattern as CSV export) to get accurate totals.
+    const STATS_BATCH = 1000
+    const s: Stats = { deliveryCount: 0, totalTransport1: 0, totalTransport2: 0, totalGrossWeight: 0, totalNetWeight: 0 }
+    let statsOffset = 0
+    let statsOk = true
+    while (true) {
+      const { data: statsRows, error: statsError } = await applyFilters(
+        supabase.from('deliveries').select('transport1_amount_zar, transport2_amount_zar, gross_weight_kg, net_weight_kg')
+      ).range(statsOffset, statsOffset + STATS_BATCH - 1)
+      if (statsError) { statsOk = false; break }
+      for (const r of statsRows || []) {
+        s.deliveryCount++
+        s.totalTransport1 += r.transport1_amount_zar || 0
+        s.totalTransport2 += r.transport2_amount_zar || 0
+        s.totalGrossWeight += r.gross_weight_kg || 0
+        s.totalNetWeight += r.net_weight_kg || 0
+      }
+      if (!statsRows || statsRows.length < STATS_BATCH) break
+      statsOffset += STATS_BATCH
     }
+    if (statsOk) setStats(s)
 
     setLoading(false)
   }, [applyFilters, sortKey, sortDir, page, supabase])
