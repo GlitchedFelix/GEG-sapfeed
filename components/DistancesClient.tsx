@@ -15,9 +15,8 @@ interface Row extends Pick<
   | 'delivery_date'
   | 'store_code'
   | 'store_name'
-  | 'customer_name'
-  | 'city'
   | 'street'
+  | 'city'
   | 'country'
   | 'distance_km'
   | 'transport1_amount_zar'
@@ -29,9 +28,8 @@ const SELECT_FIELDS = [
   'delivery_date',
   'store_code',
   'store_name',
-  'customer_name',
-  'city',
   'street',
+  'city',
   'country',
   'distance_km',
   'transport1_amount_zar',
@@ -176,8 +174,7 @@ export default function DistancesClient() {
   const COLS: { key: string; label: string; sortable: boolean }[] = [
     { key: 'delivery_date', label: 'Date', sortable: true },
     { key: 'store_code', label: 'Store', sortable: true },
-    { key: 'customer_name', label: 'Customer', sortable: true },
-    { key: 'city', label: 'City', sortable: true },
+    { key: 'address', label: 'To Address', sortable: false },
     { key: 'distance_km', label: 'Distance (km)', sortable: true },
     { key: 'transport1_amount_zar', label: 'Transport 1', sortable: true },
     { key: 'transport2_amount_zar', label: 'Transport 2', sortable: true },
@@ -319,8 +316,9 @@ export default function DistancesClient() {
                       )
                     })()}
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.customer_name ?? '—'}</td>
-                  <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.city ?? '—'}</td>
+                  <td className="px-2 py-1 text-slate-700">
+                    {[row.street, row.city, row.country].filter(Boolean).join(', ') || '—'}
+                  </td>
                   <td className="whitespace-nowrap px-2 py-1 font-semibold text-slate-900">
                     {row.distance_km != null ? `${row.distance_km} km` : '—'}
                   </td>

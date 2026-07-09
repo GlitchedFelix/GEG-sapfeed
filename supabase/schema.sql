@@ -116,6 +116,11 @@ create policy "Authenticated users can insert deliveries"
   to authenticated
   with check (true);
 
+create policy "Authenticated users can update deliveries"
+  on deliveries for update
+  to authenticated
+  using (true);
+
 -- ---------------------------------------------------------------------
 -- 4. After running this file: go to Authentication > Users in the
 --    Supabase dashboard, find your account (sign up in the app first),
