@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { parseStoreName } from '@/lib/store-utils'
 import type { Brand } from '@/lib/types'
 
 interface StoreRow {
@@ -17,13 +18,6 @@ interface StoreRow {
   error: string | null
 }
 
-// Store names come in as "C944 --- CTM Alberton" — split on " --- " to
-// get the store's own code prefix and the human-readable name separately.
-function parseStoreName(raw: string): { code: string; name: string } {
-  const sep = raw.indexOf(' --- ')
-  if (sep === -1) return { code: '', name: raw.trim() }
-  return { code: raw.slice(0, sep).trim(), name: raw.slice(sep + 5).trim() }
-}
 
 export default function SettingsClient() {
   const supabase = createClient()

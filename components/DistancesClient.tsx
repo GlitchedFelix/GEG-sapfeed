@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { parseStoreName } from '@/lib/store-utils'
 import type { Brand, DeliveryRecord } from '@/lib/types'
 
 type SortDir = 'asc' | 'desc'
@@ -44,7 +45,7 @@ export default function DistancesClient() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [storeFilter, setStoreFilter] = useState('')
-  const [storeOptions, setStoreOptions] = useState<string[]>([])
+  const [storeOptions, setStoreOptions] = useState<{ value: string; label: string }[]>([])
   const [sortKey, setSortKey] = useState('distance_km')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
@@ -111,10 +112,17 @@ export default function DistancesClient() {
       let q = supabase.from('deliveries').select('store_code, store_name').limit(1000)
       if (brand !== 'ALL') q = q.eq('brand', brand)
       const { data } = await q
-      const unique = Array.from(
-        new Map((data || []).map((r: any) => [r.store_code, `${r.store_code} — ${r.store_name}`])).entries()
-      )
-      setStoreOptions(unique.map(([, label]) => label).sort())
+      const seen = new Map<string, string>()
+      for (const r of (data || []) as any[]) {
+        if (!seen.has(r.store_code)) {
+          const { code, name } = parseStoreName(r.store_name ?? '')
+          seen.set(r.store_code, `${code || r.store_code} — ${name}`)
+        }
+      }
+      const opts = Array.from(seen.entries())
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+      setStoreOptions(opts)
       setStoreFilter('')
     }
     loadStores()
@@ -223,7 +231,7 @@ export default function DistancesClient() {
             >
               <option value="">All stores</option>
               {storeOptions.map((opt) => (
-                <option key={opt} value={opt.split(' — ')[0]}>{opt}</option>
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
@@ -301,8 +309,15 @@ export default function DistancesClient() {
                 <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.delivery_date ?? '—'}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">
-                    <span className="font-medium">{row.store_code}</span>
-                    <span className="ml-1 text-slate-400">{row.store_name}</span>
+                    {(() => {
+                      const { code, name } = parseStoreName(row.store_name ?? '')
+                      return (
+                        <>
+                          <span className="font-mono font-medium">{code || row.store_code}</span>
+                          <span className="ml-1 text-slate-400">{name || row.store_name}</span>
+                        </>
+                      )
+                    })()}
                   </td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.customer_name ?? '—'}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.city ?? '—'}</td>

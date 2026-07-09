@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { COLUMNS } from '@/lib/columns'
+import { parseStoreName } from '@/lib/store-utils'
 import type { Brand, DeliveryRecord } from '@/lib/types'
 
 type SortDir = 'asc' | 'desc'
@@ -37,7 +38,7 @@ export default function SearchClient() {
   const [rows, setRows] = useState<DeliveryRecord[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [stats, setStats] = useState<Stats | null>(null)
-  const [storeOptions, setStoreOptions] = useState<string[]>([])
+  const [storeOptions, setStoreOptions] = useState<{ value: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -128,10 +129,17 @@ export default function SearchClient() {
       let q = supabase.from('deliveries').select('store_code, store_name').limit(1000)
       if (brand !== 'ALL') q = q.eq('brand', brand)
       const { data } = await q
-      const unique = Array.from(
-        new Map((data || []).map((r: any) => [r.store_code, `${r.store_code} — ${r.store_name}`])).entries()
-      )
-      setStoreOptions(unique.map(([, label]) => label).sort())
+      const seen = new Map<string, string>()
+      for (const r of (data || []) as any[]) {
+        if (!seen.has(r.store_code)) {
+          const { code, name } = parseStoreName(r.store_name ?? '')
+          seen.set(r.store_code, `${code || r.store_code} — ${name}`)
+        }
+      }
+      const opts = Array.from(seen.entries())
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+      setStoreOptions(opts)
       setStoreFilter('')
     }
     loadStores()
@@ -346,8 +354,8 @@ export default function SearchClient() {
             >
               <option value="">All stores</option>
               {storeOptions.map((opt) => (
-                <option key={opt} value={opt.split(' — ')[0]}>
-                  {opt}
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -469,6 +477,22 @@ export default function SearchClient() {
                 <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                   {visibleCols.map((col) => {
                     const value = (row as any)[col.key]
+                    if (col.key === 'store_code') {
+                      const { code } = parseStoreName(row.store_name ?? '')
+                      return (
+                        <td key={col.key} className="whitespace-nowrap px-2 py-1 font-mono font-medium text-slate-800">
+                          {code || row.store_code}
+                        </td>
+                      )
+                    }
+                    if (col.key === 'store_name') {
+                      const { name } = parseStoreName(row.store_name ?? '')
+                      return (
+                        <td key={col.key} className="whitespace-nowrap px-2 py-1 text-slate-700">
+                          {name || row.store_name}
+                        </td>
+                      )
+                    }
                     let display: string
                     if (col.type === 'boolean') display = value ? 'Yes' : 'No'
                     else if (value === null || value === undefined) display = '—'
