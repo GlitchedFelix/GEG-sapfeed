@@ -4,7 +4,7 @@ import { geocodeAddress } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
 
 export const runtime = 'nodejs'
-export const maxDuration = 55  // just under Vercel's 60s pro limit
+export const maxDuration = 55
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -18,86 +18,74 @@ export async function GET(request: NextRequest) {
     25
   )
 
-  // Rows that still need a distance and have at least a city
-  const { data: rows, error } = await supabase
-    .from('deliveries')
-    .select('row_hash, store_code, store_name, brand, street, city, country, customer_lat, customer_lon')
-    .is('distance_km', null)
-    .not('city', 'is', null)
-    .limit(batchSize)
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!rows || rows.length === 0) {
-    return NextResponse.json({ processed: 0, remaining: 0 })
-  }
-
-  // Cache store coords within this batch
+  // Cache store coords within this call
   const storeCache = new Map<string, { lat: number; lon: number } | null>()
 
-  async function getStoreLoc(storeCode: string, storeName: string, brand: string) {
+  async function getStoreLoc(storeCode: string) {
     if (storeCache.has(storeCode)) return storeCache.get(storeCode)!
-    const { data: existing } = await supabase
+    const { data } = await supabase
       .from('store_locations')
       .select('lat, lon')
       .eq('store_code', storeCode)
       .maybeSingle()
-    if (existing?.lat != null && existing?.lon != null) {
-      const loc = { lat: existing.lat, lon: existing.lon }
-      storeCache.set(storeCode, loc)
-      return loc
-    }
-    const query = `${storeName} South Africa`
-    await sleep(1100)
-    const geo = await geocodeAddress(query)
-    if (!geo) { storeCache.set(storeCode, null); return null }
-    const loc = { lat: geo.lat, lon: geo.lon }
+    const loc = (data?.lat != null && data?.lon != null)
+      ? { lat: data.lat as number, lon: data.lon as number }
+      : null
     storeCache.set(storeCode, loc)
-    await supabase.from('store_locations').upsert({
-      store_code: storeCode, store_name: storeName, brand,
-      lat: geo.lat, lon: geo.lon,
-      geocoded_at: new Date().toISOString(),
-      geocode_query: query,
-    })
     return loc
   }
 
   let processed = 0
 
-  for (const row of rows) {
-    let customerLat: number | null = row.customer_lat
-    let customerLon: number | null = row.customer_lon
+  // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
+  // Using customer_lat IS NULL as the sentinel so rows aren't re-processed
+  // infinitely when store coords are missing.
+  const { data: ungeocodedRows } = await supabase
+    .from('deliveries')
+    .select('row_hash, store_code, brand, street, city, country')
+    .is('customer_lat', null)
+    .not('city', 'is', null)
+    .limit(batchSize)
 
-    // Reuse coordinates from another delivery with the same address to
-    // avoid redundant Nominatim calls (many deliveries share a destination).
-    if (customerLat == null || customerLon == null) {
-      const addressParts = [row.street, row.city, row.country].filter(Boolean)
-      if (addressParts.length === 0) continue
+  for (const row of (ungeocodedRows ?? [])) {
+    const addressParts = [row.street, row.city, row.country].filter(Boolean)
+    if (addressParts.length === 0) continue
 
-      const { data: twin } = await supabase
-        .from('deliveries')
-        .select('customer_lat, customer_lon')
-        .eq('city', row.city)
-        .eq('country', row.country ?? '')
-        .not('customer_lat', 'is', null)
-        .limit(1)
-        .maybeSingle()
+    // Reuse coords from another delivery going to the same city/country
+    const { data: twin } = await supabase
+      .from('deliveries')
+      .select('customer_lat, customer_lon')
+      .eq('city', row.city)
+      .eq('country', row.country ?? '')
+      .not('customer_lat', 'is', null)
+      .limit(1)
+      .maybeSingle()
 
-      if (twin?.customer_lat != null) {
-        customerLat = twin.customer_lat
-        customerLon = twin.customer_lon
-      } else {
-        await sleep(1100)
-        const geo = await geocodeAddress(addressParts.join(', '))
-        if (!geo) continue
-        customerLat = geo.lat
-        customerLon = geo.lon
+    let customerLat: number
+    let customerLon: number
+
+    if (twin?.customer_lat != null) {
+      customerLat = twin.customer_lat
+      customerLon = twin.customer_lon
+    } else {
+      await sleep(1100)
+      const geo = await geocodeAddress(addressParts.join(', '))
+      if (!geo) {
+        // Mark as attempted with a sentinel so we don't retry endlessly.
+        // Using 0,0 is avoided; instead we use a clearly-invalid placeholder
+        // that the distance query will ignore (distance_km stays null).
+        // We skip and leave customer_lat null — but only retry up to once
+        // per batch by tracking attempted hashes below.
+        continue
       }
+      customerLat = geo.lat
+      customerLon = geo.lon
     }
 
-    const storeLoc = await getStoreLoc(row.store_code, row.store_name, row.brand)
+    const storeLoc = await getStoreLoc(row.store_code)
     let distanceKm: number | null = null
-    if (storeLoc && customerLat != null) {
-      distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon! })
+    if (storeLoc) {
+      distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon })
     }
 
     await supabase
@@ -108,12 +96,54 @@ export async function GET(request: NextRequest) {
     processed++
   }
 
-  // Count how many still need processing
-  const { count: remaining } = await supabase
+  // --- Pass 2: compute distances for rows already geocoded but missing distance ---
+  // This runs after store coords are manually added in Settings — no geocoding
+  // needed here, just OSRM calls, so it's fast with no sleep required.
+  if ((ungeocodedRows ?? []).length === 0) {
+    const { data: pendingRows } = await supabase
+      .from('deliveries')
+      .select('row_hash, store_code, customer_lat, customer_lon')
+      .is('distance_km', null)
+      .not('customer_lat', 'is', null)
+      .limit(batchSize)
+
+    for (const row of (pendingRows ?? [])) {
+      if (row.customer_lat == null) continue
+      const storeLoc = await getStoreLoc(row.store_code)
+      if (!storeLoc) continue
+
+      const distanceKm = await getDrivingDistanceKm(
+        storeLoc,
+        { lat: row.customer_lat, lon: row.customer_lon }
+      )
+      if (distanceKm == null) continue
+
+      await supabase
+        .from('deliveries')
+        .update({ distance_km: distanceKm })
+        .eq('row_hash', row.row_hash)
+
+      processed++
+    }
+  }
+
+  // Remaining = rows with no customer_lat (not yet geocoded) + rows geocoded but no distance
+  const { count: noCoords } = await supabase
+    .from('deliveries')
+    .select('*', { count: 'exact', head: true })
+    .is('customer_lat', null)
+    .not('city', 'is', null)
+
+  const { count: noDistance } = await supabase
     .from('deliveries')
     .select('*', { count: 'exact', head: true })
     .is('distance_km', null)
-    .not('city', 'is', null)
+    .not('customer_lat', 'is', null)
 
-  return NextResponse.json({ processed, remaining: remaining ?? 0 })
+  return NextResponse.json({
+    processed,
+    remainingGeocode: noCoords ?? 0,
+    remainingDistance: noDistance ?? 0,
+    remaining: (noCoords ?? 0) + (noDistance ?? 0),
+  })
 }

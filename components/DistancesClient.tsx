@@ -132,11 +132,23 @@ export default function DistancesClient() {
       while (true) {
         const res = await fetch('/api/backfill-distances?batch=10')
         if (!res.ok) { setError('Backfill request failed'); break }
-        const { processed, remaining } = await res.json()
+        const json = await res.json()
+        const processed: number = json.processed
+        const remaining: number = json.remaining
+        const remainingGeocode: number = json.remainingGeocode ?? remaining
+        const remainingDistance: number = json.remainingDistance ?? 0
         totalProcessed += processed
         setBackfillProcessed(totalProcessed)
         setBackfillRemaining(remaining)
-        if (remaining === 0 || processed === 0) break
+        // Stop when nothing left, or when only distance-pending rows remain
+        // but no store coords exist yet (processed === 0 means stuck)
+        if (remaining === 0) break
+        if (processed === 0 && remainingGeocode === 0 && remainingDistance > 0) {
+          // All customer addresses geocoded but store coords missing — stop and prompt user
+          setError(`${remainingDistance} deliveries geocoded but need store coordinates. Add them in the Settings tab, then run backfill again.`)
+          break
+        }
+        if (processed === 0) break
       }
     } finally {
       setBackfilling(false)
