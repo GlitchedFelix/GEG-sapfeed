@@ -5,14 +5,24 @@ import { createClient } from '@/lib/supabase-browser'
 import type { Brand } from '@/lib/types'
 
 interface StoreRow {
-  store_code: string
-  store_name: string
+  store_code: string      // DB key e.g. ABT001
+  display_code: string    // from store_name prefix e.g. C944
+  display_name: string    // readable name e.g. CTM Alberton
+  store_name: string      // raw value e.g. "C944 --- CTM Alberton"
   brand: Brand
-  lat: string   // editable string fields
+  lat: string
   lon: string
   saved: boolean
   saving: boolean
   error: string | null
+}
+
+// Store names come in as "C944 --- CTM Alberton" — split on " --- " to
+// get the store's own code prefix and the human-readable name separately.
+function parseStoreName(raw: string): { code: string; name: string } {
+  const sep = raw.indexOf(' --- ')
+  if (sep === -1) return { code: '', name: raw.trim() }
+  return { code: raw.slice(0, sep).trim(), name: raw.slice(sep + 5).trim() }
 }
 
 export default function SettingsClient() {
@@ -25,11 +35,25 @@ export default function SettingsClient() {
     async function load() {
       setLoading(true)
 
-      // All unique stores from deliveries
-      const { data: deliveryStores } = await supabase
-        .from('deliveries')
-        .select('store_code, store_name, brand')
-        .limit(2000)
+      // Paginate through all deliveries to collect every unique store.
+      // Supabase caps a single request at 1000 rows, so we batch with range().
+      const seen = new Map<string, { store_name: string; brand: Brand }>()
+      const PAGE = 1000
+      let offset = 0
+      while (true) {
+        const { data } = await supabase
+          .from('deliveries')
+          .select('store_code, store_name, brand')
+          .range(offset, offset + PAGE - 1)
+        if (!data || data.length === 0) break
+        for (const d of data as any[]) {
+          if (!seen.has(d.store_code)) {
+            seen.set(d.store_code, { store_name: d.store_name, brand: d.brand })
+          }
+        }
+        if (data.length < PAGE) break
+        offset += PAGE
+      }
 
       // Existing stored coordinates
       const { data: locations } = await supabase
@@ -40,17 +64,16 @@ export default function SettingsClient() {
         (locations ?? []).map((l: any) => [l.store_code, { lat: l.lat, lon: l.lon }])
       )
 
-      // Deduplicate stores by store_code
-      const seen = new Set<string>()
       const rows: StoreRow[] = []
-      for (const d of (deliveryStores ?? []) as any[]) {
-        if (seen.has(d.store_code)) continue
-        seen.add(d.store_code)
-        const existing = locMap.get(d.store_code)
+      for (const [store_code, { store_name, brand }] of seen.entries()) {
+        const { code: display_code, name: display_name } = parseStoreName(store_name)
+        const existing = locMap.get(store_code)
         rows.push({
-          store_code: d.store_code,
-          store_name: d.store_name,
-          brand: d.brand,
+          store_code,
+          display_code,
+          display_name,
+          store_name,
+          brand,
           lat: existing?.lat != null ? String(existing.lat) : '',
           lon: existing?.lon != null ? String(existing.lon) : '',
           saved: existing != null,
@@ -59,7 +82,7 @@ export default function SettingsClient() {
         })
       }
 
-      rows.sort((a, b) => a.brand.localeCompare(b.brand) || a.store_code.localeCompare(b.store_code))
+      rows.sort((a, b) => a.brand.localeCompare(b.brand) || a.display_code.localeCompare(b.display_code))
       setStores(rows)
       setLoading(false)
     }
@@ -110,14 +133,12 @@ export default function SettingsClient() {
   }
 
   const visible = stores.filter((s) => brandFilter === 'ALL' || s.brand === brandFilter)
-  const missing = visible.filter((s) => !s.saved).length
-  const total = visible.length
+  const configured = visible.filter((s) => s.saved).length
 
   return (
     <main className="px-4 py-4 max-w-3xl">
       <h2 className="text-sm font-semibold text-slate-800 mb-1">Settings</h2>
 
-      {/* Geocoding section */}
       <section className="mt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
           Geocoding — Store Coordinates
@@ -127,8 +148,7 @@ export default function SettingsClient() {
           from Google Maps (right-click a location → copy lat/lng).
         </p>
 
-        {/* Brand filter */}
-        <div className="mb-3 flex gap-1">
+        <div className="mb-3 flex items-center gap-1">
           {(['ALL', 'CTM', 'ITALTILE'] as const).map((b) => (
             <button
               key={b}
@@ -141,8 +161,8 @@ export default function SettingsClient() {
             </button>
           ))}
           {!loading && (
-            <span className="ml-2 self-center text-xs text-slate-400">
-              {total - missing}/{total} stores configured
+            <span className="ml-2 text-xs text-slate-400">
+              {configured}/{visible.length} stores configured
             </span>
           )}
         </div>
@@ -154,19 +174,21 @@ export default function SettingsClient() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-24">Code</th>
+                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-20">Code</th>
                   <th className="px-3 py-2 text-left font-medium text-slate-600">Store Name</th>
                   <th className="px-3 py-2 text-left font-medium text-slate-600 w-16">Brand</th>
                   <th className="px-3 py-2 text-left font-medium text-slate-600 w-36">Latitude</th>
                   <th className="px-3 py-2 text-left font-medium text-slate-600 w-36">Longitude</th>
-                  <th className="px-3 py-2 w-20" />
+                  <th className="px-3 py-2 w-24" />
                 </tr>
               </thead>
               <tbody>
                 {visible.map((store) => (
                   <tr key={store.store_code} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-1.5 font-mono text-slate-700">{store.store_code}</td>
-                    <td className="px-3 py-1.5 text-slate-700">{store.store_name}</td>
+                    <td className="px-3 py-1.5 font-mono font-medium text-slate-800">
+                      {store.display_code || store.store_code}
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-700">{store.display_name}</td>
                     <td className="px-3 py-1.5 text-slate-500">{store.brand}</td>
                     <td className="px-3 py-1.5">
                       <input
@@ -188,7 +210,7 @@ export default function SettingsClient() {
                     </td>
                     <td className="px-3 py-1.5 text-right">
                       {store.error && (
-                        <span className="mr-2 text-red-500">{store.error}</span>
+                        <span className="mr-2 text-red-500 text-xs">{store.error}</span>
                       )}
                       {store.saved && !store.error ? (
                         <span className="text-emerald-600 font-medium">✓ Saved</span>
