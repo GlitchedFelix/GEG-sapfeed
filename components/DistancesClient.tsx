@@ -55,6 +55,10 @@ export default function DistancesClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillRemaining, setBackfillRemaining] = useState<number | null>(null)
+  const [backfillProcessed, setBackfillProcessed] = useState(0)
+
   const applyFilters = useCallback(
     (query: any) => {
       let q = query
@@ -119,6 +123,26 @@ export default function DistancesClient() {
   useEffect(() => {
     setPage(0)
   }, [brand, dateFrom, dateTo, storeFilter, sortKey, sortDir])
+
+  async function runBackfill() {
+    setBackfilling(true)
+    setBackfillProcessed(0)
+    let totalProcessed = 0
+    try {
+      while (true) {
+        const res = await fetch('/api/backfill-distances?batch=10')
+        if (!res.ok) { setError('Backfill request failed'); break }
+        const { processed, remaining } = await res.json()
+        totalProcessed += processed
+        setBackfillProcessed(totalProcessed)
+        setBackfillRemaining(remaining)
+        if (remaining === 0 || processed === 0) break
+      }
+    } finally {
+      setBackfilling(false)
+      fetchData()
+    }
+  }
 
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
@@ -203,10 +227,23 @@ export default function DistancesClient() {
 
         <div className="h-4 w-px bg-slate-200" />
 
-        <div className="text-xs text-slate-500">
-          <span className="font-semibold text-slate-900">{totalCount}</span> with distance
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span>
+            <span className="font-semibold text-slate-900">{totalCount}</span> with distance
+            {nullCount > 0 && (
+              <span className="ml-2 text-amber-600">{nullCount} pending</span>
+            )}
+          </span>
           {nullCount > 0 && (
-            <span className="ml-2 text-amber-600">{nullCount} pending geocoding</span>
+            <button
+              onClick={runBackfill}
+              disabled={backfilling}
+              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+            >
+              {backfilling
+                ? `Geocoding… ${backfillProcessed} done, ${backfillRemaining ?? '?'} left`
+                : 'Backfill distances'}
+            </button>
           )}
         </div>
       </div>
