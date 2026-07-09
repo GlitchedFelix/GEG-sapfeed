@@ -25,6 +25,9 @@ export interface DeliveryRecord {
   invoice_amount_zar: number | null
   transport1_amount_zar: number | null
   transport2_amount_zar: number | null
+  customer_lat: number | null
+  customer_lon: number | null
+  distance_km: number | null
 }
 
 export interface ImportResult {

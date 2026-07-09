@@ -123,3 +123,37 @@ create policy "Authenticated users can insert deliveries"
 --    Replace the email with your actual login email.
 -- ---------------------------------------------------------------------
 -- update profiles set is_uploader = true where email = 'you@example.com';
+
+-- ---------------------------------------------------------------------
+-- 5. Distance feature migration.
+--    Run these statements in Supabase SQL Editor to enable geocoded
+--    store locations and per-delivery driving distance tracking.
+-- ---------------------------------------------------------------------
+
+-- Store physical locations (auto-populated on import via Nominatim geocoding).
+create table if not exists store_locations (
+  store_code   text primary key,
+  store_name   text not null,
+  brand        text not null check (brand in ('CTM', 'ITALTILE')),
+  lat          double precision,
+  lon          double precision,
+  geocoded_at  timestamptz,
+  geocode_query text
+);
+
+alter table store_locations enable row level security;
+
+create policy "Authenticated users can view store locations"
+  on store_locations for select to authenticated using (true);
+
+create policy "Authenticated users can insert store locations"
+  on store_locations for insert to authenticated with check (true);
+
+create policy "Authenticated users can update store locations"
+  on store_locations for update to authenticated using (true);
+
+-- New columns on deliveries for geocoded customer address + driving distance.
+alter table deliveries
+  add column if not exists customer_lat  double precision,
+  add column if not exists customer_lon  double precision,
+  add column if not exists distance_km   double precision;
