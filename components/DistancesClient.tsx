@@ -143,18 +143,17 @@ export default function DistancesClient() {
         const remaining: number = json.remaining
         const remainingGeocode: number = json.remainingGeocode ?? remaining
         const remainingDistance: number = json.remainingDistance ?? 0
+        const exhausted: boolean = json.exhausted ?? false
         totalProcessed += processed
         setBackfillProcessed(totalProcessed)
         setBackfillRemaining(remaining)
-        // Stop when nothing left, or when only distance-pending rows remain
-        // but no store coords exist yet (processed === 0 means stuck)
         if (remaining === 0) break
-        if (processed === 0 && remainingGeocode === 0 && remainingDistance > 0) {
-          // All customer addresses geocoded but store coords missing — stop and prompt user
+        if (exhausted && remainingGeocode === 0 && remainingDistance > 0) {
+          // All geocodable addresses done but store coords missing for remaining rows
           setError(`${remainingDistance} deliveries geocoded but need store coordinates. Add them in the Settings tab, then run backfill again.`)
           break
         }
-        if (processed === 0) break
+        if (exhausted) break
       }
     } finally {
       setBackfilling(false)

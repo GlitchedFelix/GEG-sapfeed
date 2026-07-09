@@ -36,10 +36,12 @@ export async function GET(request: NextRequest) {
   }
 
   let processed = 0
+  let pass1Found = 0
+  let pass2Found = 0
 
   // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
-  // Using customer_lat IS NULL as the sentinel so rows aren't re-processed
-  // infinitely when store coords are missing.
+  // Using customer_lat IS NULL + geocode_failed=false as the sentinel so rows
+  // aren't re-processed once Nominatim has already failed for them.
   const { data: ungeocodedRows } = await supabase
     .from('deliveries')
     .select('row_hash, store_code, brand, street, city, country')
@@ -47,6 +49,8 @@ export async function GET(request: NextRequest) {
     .eq('geocode_failed', false)
     .not('city', 'is', null)
     .limit(batchSize)
+
+  pass1Found = (ungeocodedRows ?? []).length
 
   for (const row of (ungeocodedRows ?? [])) {
     const addressParts = [row.street, row.city, row.country].filter(Boolean)
@@ -100,13 +104,15 @@ export async function GET(request: NextRequest) {
   // --- Pass 2: compute distances for rows already geocoded but missing distance ---
   // This runs after store coords are manually added in Settings — no geocoding
   // needed here, just OSRM calls, so it's fast with no sleep required.
-  if ((ungeocodedRows ?? []).length === 0) {
+  if (pass1Found === 0) {
     const { data: pendingRows } = await supabase
       .from('deliveries')
       .select('row_hash, store_code, customer_lat, customer_lon')
       .is('distance_km', null)
       .not('customer_lat', 'is', null)
       .limit(batchSize)
+
+    pass2Found = (pendingRows ?? []).length
 
     for (const row of (pendingRows ?? [])) {
       if (row.customer_lat == null) continue
@@ -147,5 +153,7 @@ export async function GET(request: NextRequest) {
     remainingGeocode: noCoords ?? 0,
     remainingDistance: noDistance ?? 0,
     remaining: (noCoords ?? 0) + (noDistance ?? 0),
+    // True only when both passes found zero rows to attempt — caller should stop.
+    exhausted: pass1Found === 0 && pass2Found === 0,
   })
 }
