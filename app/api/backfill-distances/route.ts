@@ -44,12 +44,16 @@ export async function GET(request: NextRequest) {
     .from('deliveries')
     .select('row_hash, store_code, brand, street, city, country')
     .is('customer_lat', null)
+    .eq('geocode_failed', false)
     .not('city', 'is', null)
     .limit(batchSize)
 
   for (const row of (ungeocodedRows ?? [])) {
     const addressParts = [row.street, row.city, row.country].filter(Boolean)
-    if (addressParts.length === 0) continue
+    if (addressParts.length === 0) {
+      await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+      continue
+    }
 
     // Reuse coords from another delivery going to the same city/country
     const { data: twin } = await supabase
@@ -71,11 +75,8 @@ export async function GET(request: NextRequest) {
       await sleep(1100)
       const geo = await geocodeAddress(addressParts.join(', '))
       if (!geo) {
-        // Mark as attempted with a sentinel so we don't retry endlessly.
-        // Using 0,0 is avoided; instead we use a clearly-invalid placeholder
-        // that the distance query will ignore (distance_km stays null).
-        // We skip and leave customer_lat null — but only retry up to once
-        // per batch by tracking attempted hashes below.
+        // Mark permanently so this row is never re-fetched by the backfill.
+        await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
         continue
       }
       customerLat = geo.lat
@@ -132,6 +133,7 @@ export async function GET(request: NextRequest) {
     .from('deliveries')
     .select('*', { count: 'exact', head: true })
     .is('customer_lat', null)
+    .eq('geocode_failed', false)
     .not('city', 'is', null)
 
   const { count: noDistance } = await supabase
