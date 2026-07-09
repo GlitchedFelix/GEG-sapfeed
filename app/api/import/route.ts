@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { parseSapExport } from '@/lib/sap-parser'
+import { geocodeAddress } from '@/lib/geocoding'
+import { getDrivingDistanceKm } from '@/lib/routing'
 import type { ImportResult } from '@/lib/types'
 
 export const runtime = 'nodejs'
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export async function POST(request: NextRequest) {
   const supabase = createClient()
@@ -74,6 +78,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
     insertedCount += count ?? batch.length
+  }
+
+  // --- Geocoding + distance calculation for newly inserted records ---
+  // Runs after insert so import always succeeds even if geo APIs are down.
+  if (newRecords.length > 0) {
+    // Cache store coords to avoid re-geocoding the same store multiple times
+    // within a single import batch.
+    const storeCoordCache = new Map<string, { lat: number; lon: number } | null>()
+
+    for (const record of newRecords) {
+      // 1. Resolve store coordinates (from DB or geocode fresh)
+      let storeLoc: { lat: number; lon: number } | null = null
+
+      if (storeCoordCache.has(record.store_code)) {
+        storeLoc = storeCoordCache.get(record.store_code)!
+      } else {
+        const { data: existing } = await supabase
+          .from('store_locations')
+          .select('lat, lon')
+          .eq('store_code', record.store_code)
+          .maybeSingle()
+
+        if (existing?.lat != null && existing?.lon != null) {
+          storeLoc = { lat: existing.lat, lon: existing.lon }
+        } else {
+          const query = `${record.store_name} South Africa`
+          await sleep(1100)  // Nominatim ToS: max 1 req/sec
+          const geo = await geocodeAddress(query)
+          if (geo) {
+            storeLoc = { lat: geo.lat, lon: geo.lon }
+            await supabase.from('store_locations').upsert({
+              store_code: record.store_code,
+              store_name: record.store_name,
+              brand: record.brand,
+              lat: geo.lat,
+              lon: geo.lon,
+              geocoded_at: new Date().toISOString(),
+              geocode_query: query,
+            })
+          }
+        }
+        storeCoordCache.set(record.store_code, storeLoc)
+      }
+
+      // 2. Geocode customer delivery address
+      const addressParts = [record.street, record.city, record.country].filter(Boolean)
+      if (addressParts.length === 0) continue
+
+      await sleep(1100)  // Nominatim ToS: max 1 req/sec
+      const customerGeo = await geocodeAddress(addressParts.join(', '))
+      if (!customerGeo) continue
+
+      // 3. Calculate driving distance
+      let distanceKm: number | null = null
+      if (storeLoc) {
+        distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerGeo.lat, lon: customerGeo.lon })
+      }
+
+      // 4. Persist coordinates + distance back onto the delivery row
+      await supabase
+        .from('deliveries')
+        .update({
+          customer_lat: customerGeo.lat,
+          customer_lon: customerGeo.lon,
+          distance_km: distanceKm,
+        })
+        .eq('row_hash', record.row_hash)
+    }
   }
 
   const result: ImportResult = {

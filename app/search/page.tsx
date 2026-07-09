@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase-server'
 import NavBar from '@/components/NavBar'
-import SearchClient from '@/components/SearchClient'
+import SearchTabs from '@/components/SearchTabs'
 
 export default async function SearchPage() {
   const supabase = createClient()
@@ -11,7 +11,7 @@ export default async function SearchPage() {
   return (
     <div className="min-h-screen">
       <NavBar />
-      <SearchClient />
+      <SearchTabs />
     </div>
   )
 }

@@ -236,6 +236,9 @@ export function parseSapExport(raw: string, filename: string): {
         invoice_amount_zar: invoiceAmount,
         transport1_amount_zar: transport1,
         transport2_amount_zar: transport2,
+        customer_lat: null,
+        customer_lon: null,
+        distance_km: null,
       }
 
       if (!record.store_code || !record.delivery_number || !record.billing_document) {
