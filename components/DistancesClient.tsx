@@ -13,6 +13,7 @@ interface Row extends Pick<
   DeliveryRecord,
   | 'row_hash'
   | 'delivery_date'
+  | 'billing_document'
   | 'store_code'
   | 'store_name'
   | 'street'
@@ -26,6 +27,7 @@ interface Row extends Pick<
 const SELECT_FIELDS = [
   'row_hash',
   'delivery_date',
+  'billing_document',
   'store_code',
   'store_name',
   'street',
@@ -172,6 +174,7 @@ export default function DistancesClient() {
 
   const COLS: { key: string; label: string; sortable: boolean }[] = [
     { key: 'delivery_date', label: 'Date', sortable: true },
+    { key: 'billing_document', label: 'Billing Document', sortable: true },
     { key: 'store_code', label: 'Store', sortable: true },
     { key: 'address', label: 'To Address', sortable: false },
     { key: 'distance_km', label: 'Distance (km)', sortable: true },
@@ -304,6 +307,7 @@ export default function DistancesClient() {
               rows.map((row, i) => (
                 <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{row.delivery_date ?? '—'}</td>
+                  <td className="whitespace-nowrap px-2 py-1 font-mono text-slate-700">{row.billing_document ?? '—'}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">
                     {(() => {
                       const { code, name } = parseStoreName(row.store_name ?? '')
