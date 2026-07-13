@@ -17,6 +17,18 @@ type SortDir = 'asc' | 'desc'
 
 const PAGE_SIZE = 50
 
+const FAIL_REASON_LABELS: Record<string, string> = {
+  no_store_location: 'No store location set',
+  no_route: 'No road route found',
+  http_error: 'Mapping service error',
+  rate_limited: 'Rate limited',
+}
+
+function failReasonLabel(reason: string | null): string {
+  if (reason == null) return 'Unknown'
+  return FAIL_REASON_LABELS[reason] ?? reason
+}
+
 interface Row extends Pick<
   DeliveryRecord,
   | 'row_hash'
@@ -70,6 +82,8 @@ export default function DistancesClient() {
   const [totalCount, setTotalCount] = useState(0)
   const [nullCount, setNullCount] = useState(0)
   const [distanceFailedCount, setDistanceFailedCount] = useState(0)
+  const [failedByReason, setFailedByReason] = useState<{ reason: string | null; count: number }[]>([])
+  const [showFailedBreakdown, setShowFailedBreakdown] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -169,6 +183,25 @@ export default function DistancesClient() {
       supabase.from('deliveries').select('*', { count: 'exact', head: true }).eq('distance_failed', true)
     )
     setDistanceFailedCount(failedCount || 0)
+
+    // Breakdown of failures by reason, so it's clear what's actionable (e.g. a
+    // missing store location) vs a dead end (no road route found).
+    if (failedCount) {
+      const { data: reasonRows } = await applyFilters(
+        supabase.from('deliveries').select('distance_fail_reason').eq('distance_failed', true)
+      )
+      const counts = new Map<string | null, number>()
+      for (const r of (reasonRows as { distance_fail_reason: string | null }[] | null) ?? []) {
+        counts.set(r.distance_fail_reason, (counts.get(r.distance_fail_reason) ?? 0) + 1)
+      }
+      setFailedByReason(
+        Array.from(counts.entries())
+          .map(([reason, count]) => ({ reason, count }))
+          .sort((a, b) => b.count - a.count)
+      )
+    } else {
+      setFailedByReason([])
+    }
 
     setLoading(false)
   }, [applyFilters, sortKey, sortDir, page, supabase])
@@ -421,13 +454,34 @@ export default function DistancesClient() {
         <div className="h-4 w-px bg-slate-200" />
 
         <div className="flex items-center gap-3 text-xs text-slate-500">
-          <span>
+          <span className="relative">
             <span className="font-semibold text-slate-900">{totalCount}</span> with distance
             {nullCount > 0 && (
               <span className="ml-2 text-amber-600">{nullCount} pending</span>
             )}
             {distanceFailedCount > 0 && (
-              <span className="ml-2 text-red-600">{distanceFailedCount} failed</span>
+              <button
+                onClick={() => setShowFailedBreakdown((v) => !v)}
+                className="ml-2 text-red-600 underline decoration-dotted underline-offset-2 hover:text-red-700"
+              >
+                {distanceFailedCount} failed
+              </button>
+            )}
+            {showFailedBreakdown && failedByReason.length > 0 && (
+              <div className="absolute left-0 top-full z-10 mt-1 min-w-[220px] rounded border border-slate-200 bg-white p-2 text-xs shadow-md">
+                <div className="mb-1 flex items-center justify-between font-medium text-slate-700">
+                  <span>Failed distance reasons</span>
+                  <button onClick={() => setShowFailedBreakdown(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+                <ul>
+                  {failedByReason.map(({ reason, count }) => (
+                    <li key={reason ?? 'unknown'} className="flex items-center justify-between gap-4 py-0.5 text-slate-600">
+                      <span>{failReasonLabel(reason)}</span>
+                      <span className="font-mono font-medium text-slate-900">{count}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </span>
           {nullCount > 0 && (
