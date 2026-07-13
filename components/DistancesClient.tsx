@@ -196,9 +196,14 @@ export default function DistancesClient() {
         const remainingGeocode: number = json.remainingGeocode ?? remaining
         const remainingDistance: number = json.remainingDistance ?? 0
         const exhausted: boolean = json.exhausted ?? false
+        const writeErrors: string[] = json.errors ?? []
         totalProcessed += processed
         setBackfillProcessed(totalProcessed)
         setBackfillRemaining(remaining)
+        if (writeErrors.length > 0) {
+          setError(`Backfill write failed: ${writeErrors[0]}`)
+          break
+        }
         if (remaining === 0) break
         if (exhausted && remainingGeocode === 0 && remainingDistance > 0) {
           // All geocodable addresses done but store coords missing for remaining rows

@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
   let processed = 0
   let pass1Found = 0
   let pass2Found = 0
+  const errors: string[] = []
+  function logWriteError(rowHash: string, error: { message: string } | null) {
+    if (!error) return
+    console.error(`[backfill-distances] update failed for row_hash=${rowHash}: ${error.message}`)
+    if (errors.length < 5) errors.push(`${rowHash}: ${error.message}`)
+  }
 
   // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
   // Using customer_lat IS NULL + geocode_failed=false as the sentinel so rows
@@ -55,7 +61,8 @@ export async function GET(request: NextRequest) {
   for (const row of (ungeocodedRows ?? [])) {
     const addressParts = [row.street, row.city, row.country].filter(Boolean)
     if (addressParts.length === 0) {
-      await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+      const { error } = await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+      logWriteError(row.row_hash, error)
       continue
     }
 
@@ -80,7 +87,8 @@ export async function GET(request: NextRequest) {
       const geo = await geocodeAddress(addressParts.join(', '))
       if (!geo) {
         // Mark permanently so this row is never re-fetched by the backfill.
-        await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+        const { error } = await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+        logWriteError(row.row_hash, error)
         continue
       }
       customerLat = geo.lat
@@ -93,10 +101,11 @@ export async function GET(request: NextRequest) {
       distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon })
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('deliveries')
       .update({ customer_lat: customerLat, customer_lon: customerLon, distance_km: distanceKm })
       .eq('row_hash', row.row_hash)
+    logWriteError(row.row_hash, updateError)
 
     processed++
   }
@@ -125,10 +134,11 @@ export async function GET(request: NextRequest) {
       )
       if (distanceKm == null) continue
 
-      await supabase
+      const { error: updateError } = await supabase
         .from('deliveries')
         .update({ distance_km: distanceKm })
         .eq('row_hash', row.row_hash)
+      logWriteError(row.row_hash, updateError)
 
       processed++
     }
@@ -155,5 +165,6 @@ export async function GET(request: NextRequest) {
     remaining: (noCoords ?? 0) + (noDistance ?? 0),
     // True only when both passes found zero rows to attempt — caller should stop.
     exhausted: pass1Found === 0 && pass2Found === 0,
+    errors,
   })
 }
