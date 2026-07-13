@@ -41,11 +41,13 @@ export function computePayout(
     return distanceKm * card.long_distance_rate_zar_per_km
   }
 
-  // Under 1 ton always uses the flat weight-band rate, regardless of IBT status.
-  // IBT only distinguishes which per-ton rate applies once weight reaches 1 ton.
-  const weightBand =
-    netWeightKg >= 1000
-      ? weightBands.find((b) => b.mode === 'per_ton' && b.is_ibt === isIbt)
+  // IBT always uses the IBT per-ton rate, no matter the weight. Non-IBT uses
+  // the flat weight-band rate below 1 ton, and the "1 Ton+" per-ton rate at
+  // or above it.
+  const weightBand = isIbt
+    ? weightBands.find((b) => b.mode === 'per_ton' && b.is_ibt)
+    : netWeightKg >= 1000
+      ? weightBands.find((b) => b.mode === 'per_ton' && !b.is_ibt)
       : weightBands.find((b) => b.mode === 'flat' && inBand(netWeightKg, b.min_kg, b.max_kg))
   if (!weightBand) return null
 
@@ -57,5 +59,9 @@ export function computePayout(
   )
   if (!cell) return null
 
-  return weightBand.mode === 'per_ton' ? cell.amount_zar * (netWeightKg / 1000) : cell.amount_zar
+  if (weightBand.mode !== 'per_ton') return cell.amount_zar
+
+  // IBT under 1 ton is billed as a full ton, never scaled down below the per-ton rate.
+  const tons = Math.max(netWeightKg, 1000) / 1000
+  return cell.amount_zar * tons
 }
