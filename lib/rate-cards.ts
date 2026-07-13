@@ -16,6 +16,9 @@ function inBand(value: number, min: number, max: number | null): boolean {
   return value >= min && (max == null || value < max)
 }
 
+// distanceBands and weightBands are the global, shared grid structure —
+// the same for every rate card. Only cells (and long_distance_rate_zar_per_km)
+// are specific to the given card.
 export function computePayout(
   card: RateCard,
   distanceBands: RateCardDistanceBand[],
@@ -27,12 +30,10 @@ export function computePayout(
 ): number | null {
   if (distanceKm == null || netWeightKg == null) return null
 
-  const cardDistanceBands = distanceBands.filter((b) => b.rate_card_id === card.id)
-  const cardWeightBands = weightBands.filter((b) => b.rate_card_id === card.id)
   const cardCells = cells.filter((c) => c.rate_card_id === card.id)
 
   // Distances beyond the last configured band fall back to a flat per-km rate.
-  const maxBandedKm = cardDistanceBands.reduce(
+  const maxBandedKm = distanceBands.reduce(
     (max, b) => (b.max_km == null ? Infinity : Math.max(max, b.max_km)),
     0
   )
@@ -41,11 +42,11 @@ export function computePayout(
   }
 
   const weightBand = isIbt
-    ? cardWeightBands.find((b) => b.is_ibt)
-    : cardWeightBands.find((b) => !b.is_ibt && inBand(netWeightKg, b.min_kg, b.max_kg))
+    ? weightBands.find((b) => b.is_ibt)
+    : weightBands.find((b) => !b.is_ibt && inBand(netWeightKg, b.min_kg, b.max_kg))
   if (!weightBand) return null
 
-  const distanceBand = cardDistanceBands.find((b) => inBand(distanceKm, b.min_km, b.max_km))
+  const distanceBand = distanceBands.find((b) => inBand(distanceKm, b.min_km, b.max_km))
   if (!distanceBand) return null
 
   const cell = cardCells.find(

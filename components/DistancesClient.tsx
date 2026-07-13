@@ -83,8 +83,8 @@ export default function DistancesClient() {
     async function loadRateCards() {
       const [cardsRes, distRes, weightRes, cellsRes] = await Promise.all([
         supabase.from('rate_cards').select('*'),
-        supabase.from('rate_card_distance_bands').select('*'),
-        supabase.from('rate_card_weight_bands').select('*'),
+        supabase.from('distance_bands').select('*').order('position'),
+        supabase.from('weight_bands').select('*').order('position'),
         supabase.from('rate_card_cells').select('*'),
       ])
       setRateCards((cardsRes.data as RateCard[]) || [])

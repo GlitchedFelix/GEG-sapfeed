@@ -46,9 +46,10 @@ export interface RateCard {
   long_distance_rate_zar_per_km: number
 }
 
+// Distance and weight bands are global — every rate card shares the same
+// grid structure. Only the per-cell payout amount differs between cards.
 export interface RateCardDistanceBand {
   id: number
-  rate_card_id: number
   position: number
   min_km: number
   max_km: number | null
@@ -56,7 +57,6 @@ export interface RateCardDistanceBand {
 
 export interface RateCardWeightBand {
   id: number
-  rate_card_id: number
   position: number
   label: string
   min_kg: number

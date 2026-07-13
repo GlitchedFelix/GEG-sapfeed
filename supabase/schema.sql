@@ -261,3 +261,96 @@ create policy "Authenticated users can update rate card cells"
   on rate_card_cells for update to authenticated using (true);
 create policy "Authenticated users can delete rate card cells"
   on rate_card_cells for delete to authenticated using (true);
+
+-- ---------------------------------------------------------------------
+-- 7. Rate cards: shared band structure.
+--    Originally each rate card stored its own copy of distance/weight
+--    bands. Per product decision, every rate card must share the same
+--    distance and weight ranges — only the payout amount per cell (and
+--    the long-distance rate) differs between rate cards. Bands are now
+--    global, referenced by rate_card_cells; changing a band's range
+--    affects every rate card. No rate card data existed yet at the time
+--    of this migration, so the old per-card band tables are dropped
+--    outright rather than migrated.
+-- ---------------------------------------------------------------------
+
+drop table if exists rate_card_cells;
+drop table if exists rate_card_distance_bands;
+drop table if exists rate_card_weight_bands;
+
+create table if not exists distance_bands (
+  id        bigserial primary key,
+  position  int not null unique,
+  min_km    numeric not null default 0,
+  max_km    numeric -- null = no upper bound
+);
+
+create table if not exists weight_bands (
+  id        bigserial primary key,
+  position  int not null unique,
+  label     text not null,
+  min_kg    numeric not null default 0,
+  max_kg    numeric, -- null = no upper bound
+  mode      text not null check (mode in ('flat', 'per_ton')),
+  is_ibt    boolean not null default false
+);
+
+create table if not exists rate_card_cells (
+  id                bigserial primary key,
+  rate_card_id      bigint not null references rate_cards(id) on delete cascade,
+  weight_band_id    bigint not null references weight_bands(id) on delete cascade,
+  distance_band_id  bigint not null references distance_bands(id) on delete cascade,
+  amount_zar        numeric not null,
+  unique (rate_card_id, weight_band_id, distance_band_id)
+);
+
+create index idx_rate_card_cells_card on rate_card_cells(rate_card_id);
+
+alter table distance_bands enable row level security;
+alter table weight_bands enable row level security;
+alter table rate_card_cells enable row level security;
+
+create policy "Authenticated users can view distance bands"
+  on distance_bands for select to authenticated using (true);
+create policy "Authenticated users can insert distance bands"
+  on distance_bands for insert to authenticated with check (true);
+create policy "Authenticated users can update distance bands"
+  on distance_bands for update to authenticated using (true);
+create policy "Authenticated users can delete distance bands"
+  on distance_bands for delete to authenticated using (true);
+
+create policy "Authenticated users can view weight bands"
+  on weight_bands for select to authenticated using (true);
+create policy "Authenticated users can insert weight bands"
+  on weight_bands for insert to authenticated with check (true);
+create policy "Authenticated users can update weight bands"
+  on weight_bands for update to authenticated using (true);
+create policy "Authenticated users can delete weight bands"
+  on weight_bands for delete to authenticated using (true);
+
+create policy "Authenticated users can view rate card cells"
+  on rate_card_cells for select to authenticated using (true);
+create policy "Authenticated users can insert rate card cells"
+  on rate_card_cells for insert to authenticated with check (true);
+create policy "Authenticated users can update rate card cells"
+  on rate_card_cells for update to authenticated using (true);
+create policy "Authenticated users can delete rate card cells"
+  on rate_card_cells for delete to authenticated using (true);
+
+-- Seed the standard grid structure (12 distance bands x 9 weight bands)
+-- matching the reference rate card. Payout amounts are entered per rate
+-- card via the Settings UI, not seeded here.
+insert into distance_bands (position, min_km, max_km) values
+  (0, 0, 6), (1, 6, 11), (2, 11, 21), (3, 21, 31), (4, 31, 41), (5, 41, 51),
+  (6, 51, 61), (7, 61, 71), (8, 71, 81), (9, 81, 101), (10, 101, 121), (11, 121, 151);
+
+insert into weight_bands (position, label, min_kg, max_kg, mode, is_ibt) values
+  (0, '0-20 Kgs', 0, 21, 'flat', false),
+  (1, '21-40 Kgs', 21, 41, 'flat', false),
+  (2, '41-100 Kgs', 41, 101, 'flat', false),
+  (3, '101-400 Kgs', 101, 401, 'flat', false),
+  (4, '401-600 Kgs', 401, 601, 'flat', false),
+  (5, '601-800 Kgs', 601, 801, 'flat', false),
+  (6, '801-999 Kgs', 801, 1000, 'flat', false),
+  (7, '1 Ton+', 1000, null, 'per_ton', false),
+  (8, 'IBT per Ton', 0, null, 'per_ton', true);
