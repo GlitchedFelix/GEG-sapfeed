@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { parseRateCardGrid } from '@/lib/rate-card-file'
 import type { RateCard, RateCardDistanceBand, RateCardWeightBand, RateCardCell } from '@/lib/types'
 
 function numOrNull(s: string): number | null {
@@ -39,6 +40,14 @@ export default function RateCardsSection() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+
+  const [uploadDate, setUploadDate] = useState('')
+  const [uploadLabel, setUploadLabel] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
+  const [dragActive, setDragActive] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   async function loadBands() {
     setLoadingBands(true)
@@ -165,6 +174,72 @@ export default function RateCardsSection() {
     }
   }
 
+  // Drop a spreadsheet shaped like the reference rate card in and it either
+  // updates the rate card for uploadDate (if one already exists) or creates
+  // a new one, then fills in all cell amounts from the file.
+  async function handleUpload(file: File) {
+    if (!uploadDate) {
+      setUploadError('Pick an effective date for this upload first.')
+      return
+    }
+    setUploading(true)
+    setUploadError(null)
+    setUploadSuccess(null)
+    try {
+      const grid = await parseRateCardGrid(file, distanceBands.length, weightBands.length)
+
+      const existing = rateCards.find((c) => c.effective_date === uploadDate)
+      let cardId: number
+      let isNew = false
+      if (existing) {
+        cardId = existing.id
+        if (uploadLabel) {
+          const { error } = await supabase.from('rate_cards').update({ label: uploadLabel }).eq('id', existing.id)
+          if (error) throw error
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('rate_cards')
+          .insert({ effective_date: uploadDate, label: uploadLabel || null })
+          .select()
+          .single()
+        if (error || !data) throw error ?? new Error('Failed to create rate card')
+        cardId = (data as RateCard).id
+        isNew = true
+      }
+
+      const cellRows = []
+      for (let wi = 0; wi < weightBands.length; wi++) {
+        for (let di = 0; di < distanceBands.length; di++) {
+          const amount = grid[wi]?.[di]
+          if (amount == null) continue
+          cellRows.push({
+            rate_card_id: cardId,
+            weight_band_id: weightBands[wi].id,
+            distance_band_id: distanceBands[di].id,
+            amount_zar: amount,
+          })
+        }
+      }
+      if (cellRows.length > 0) {
+        const { error } = await supabase
+          .from('rate_card_cells')
+          .upsert(cellRows, { onConflict: 'rate_card_id,weight_band_id,distance_band_id' })
+        if (error) throw error
+      }
+
+      await loadCards()
+      await selectCard(cardId)
+      setUploadSuccess(`${isNew ? 'Created' : 'Updated'} the ${uploadDate} rate card with ${cellRows.length} amounts.`)
+      setUploadDate('')
+      setUploadLabel('')
+    } catch (err: any) {
+      setUploadError(err?.message ?? 'Failed to parse or upload the file')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-1">
@@ -222,6 +297,64 @@ export default function RateCardsSection() {
         >
           {creating ? 'Creating…' : '+ New rate card'}
         </button>
+      </div>
+
+      <div className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
+        <p className="mb-2 text-xs text-slate-500">
+          Or upload a spreadsheet in the same layout as the reference rate card (distance bands
+          across the top, weight bands down the side) — it updates the rate card for the date
+          below if one already exists, or creates a new one.
+        </p>
+        <div className="mb-2 flex items-end gap-2">
+          <div>
+            <label className="mb-0.5 block text-xs text-slate-400">Effective date</label>
+            <input
+              type="date"
+              value={uploadDate}
+              onChange={(e) => setUploadDate(e.target.value)}
+              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+            />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-xs text-slate-400">Label (optional)</label>
+            <input
+              type="text"
+              value={uploadLabel}
+              onChange={(e) => setUploadLabel(e.target.value)}
+              placeholder="e.g. 2026 rates"
+              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+            />
+          </div>
+        </div>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true) }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragActive(false)
+            const file = e.dataTransfer.files?.[0]
+            if (file) handleUpload(file)
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          className={`flex cursor-pointer items-center justify-center rounded-md border-2 border-dashed px-3 py-4 text-xs ${
+            dragActive ? 'border-slate-500 bg-slate-50 text-slate-600' : 'border-slate-300 text-slate-400 hover:bg-slate-50'
+          }`}
+        >
+          {uploading ? 'Uploading…' : 'Drop a .xlsx/.csv rate card here, or click to browse'}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleUpload(file)
+              e.target.value = ''
+            }}
+          />
+        </div>
+        {uploadSuccess && <p className="mt-2 text-xs font-medium text-emerald-600">✓ {uploadSuccess}</p>}
+        {uploadError && <p className="mt-2 text-xs text-red-500">{uploadError}</p>}
       </div>
 
       {loadingBands ? (
