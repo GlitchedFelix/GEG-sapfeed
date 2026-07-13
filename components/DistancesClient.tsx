@@ -106,7 +106,9 @@ export default function DistancesClient() {
       rateCells,
       row.distance_km,
       row.net_weight_kg,
-      !!(row.ibt_from || row.ibt_to)
+      // IBT rate selection is disabled until IBT is a properly supported
+      // delivery type — every delivery uses the standard (non-IBT) bands.
+      false
     )
   }
 
