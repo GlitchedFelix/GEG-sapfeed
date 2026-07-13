@@ -39,17 +39,25 @@ export interface ImportResult {
   errors: string[]
 }
 
+// Each brand/channel has its own independent rate card system: its own
+// bands and its own effective-dated cards. CTM's system predates the
+// others and is the only one using the 'per_ton' weight-band mode /
+// long_distance_rate_zar_per_km fallback.
+export type RateSystem = 'CTM' | 'ITALTILE_STORE' | 'ITALTILE_WEBSTORE'
+
 export interface RateCard {
   id: number
+  system: RateSystem
   effective_date: string
   label: string | null
   long_distance_rate_zar_per_km: number
 }
 
-// Distance and weight bands are global — every rate card shares the same
-// grid structure. Only the per-cell payout amount differs between cards.
+// Distance and weight bands are shared by every rate card within the same
+// system. Only the per-cell payout amount differs between cards.
 export interface RateCardDistanceBand {
   id: number
+  system: RateSystem
   position: number
   min_km: number
   max_km: number | null
@@ -57,11 +65,16 @@ export interface RateCardDistanceBand {
 
 export interface RateCardWeightBand {
   id: number
+  system: RateSystem
   position: number
   label: string
   min_kg: number
   max_kg: number | null
-  mode: 'flat' | 'per_ton'
+  // 'flat': amount_zar is the payout directly.
+  // 'per_ton' (CTM only): amount_zar * (net_weight_kg / 1000).
+  // 'over_1000_surcharge' (Italtile only): amount_zar is a R/kg rate
+  // added on top of the system's top flat band, for kg above 1000.
+  mode: 'flat' | 'per_ton' | 'over_1000_surcharge'
   is_ibt: boolean
 }
 

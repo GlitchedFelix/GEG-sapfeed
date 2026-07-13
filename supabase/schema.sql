@@ -356,3 +356,84 @@ insert into weight_bands (position, label, min_kg, max_kg, mode, is_ibt) values
   (6, '801-999 Kgs', 801, 1000, 'flat', false),
   (7, '1 Ton+', 1000, null, 'per_ton', false),
   (8, 'IBT per Ton', 0, null, 'per_ton', true);
+
+-- ---------------------------------------------------------------------
+-- 8. Rate card systems: Italtile Stores and Italtile Webstore.
+--    CTM's rate card was the only system and its bands/cards were global.
+--    Italtile turns out to have its own rate structure, and in fact two
+--    separate ones (physical stores vs the webstore), each shaped
+--    differently from CTM's and from each other. Bands and rate cards
+--    are now scoped per "system" so each can have its own grid; existing
+--    rows backfill to 'CTM' via the column default, so CTM is unaffected.
+--    A new weight-band mode, 'over_1000_surcharge', holds the Italtile
+--    per-kg-over-1-ton rate — unlike CTM's 'per_ton' (which multiplies
+--    the whole weight by a per-ton rate), Italtile charges a flat base
+--    (the top flat band's amount) plus this surcharge times only the
+--    kg above 1000. That formula lives in application code, not SQL.
+-- ---------------------------------------------------------------------
+
+alter table distance_bands
+  add column if not exists system text not null default 'CTM'
+    check (system in ('CTM', 'ITALTILE_STORE', 'ITALTILE_WEBSTORE'));
+
+alter table weight_bands
+  add column if not exists system text not null default 'CTM'
+    check (system in ('CTM', 'ITALTILE_STORE', 'ITALTILE_WEBSTORE'));
+
+alter table rate_cards
+  add column if not exists system text not null default 'CTM'
+    check (system in ('CTM', 'ITALTILE_STORE', 'ITALTILE_WEBSTORE'));
+
+-- Bands/cards were previously unique globally by position/effective_date;
+-- now they must only be unique within their own system.
+alter table distance_bands drop constraint if exists distance_bands_position_key;
+alter table distance_bands add constraint distance_bands_system_position_key unique (system, position);
+
+alter table weight_bands drop constraint if exists weight_bands_position_key;
+alter table weight_bands add constraint weight_bands_system_position_key unique (system, position);
+
+alter table rate_cards drop constraint if exists rate_cards_effective_date_key;
+alter table rate_cards add constraint rate_cards_system_effective_date_key unique (system, effective_date);
+
+alter table weight_bands drop constraint if exists weight_bands_mode_check;
+alter table weight_bands add constraint weight_bands_mode_check
+  check (mode in ('flat', 'per_ton', 'over_1000_surcharge'));
+
+-- Italtile Stores: distance bands 0-150km (151+ is a custom quote, left
+-- unbanded so it has no matching cell). Weight bands match the store
+-- rate card template's columns (0-80 / 81-300 / 300-1000 flat, then the
+-- "rate per kg more than 1 ton" surcharge).
+insert into distance_bands (system, position, min_km, max_km) values
+  ('ITALTILE_STORE', 0, 0, 31), ('ITALTILE_STORE', 1, 31, 61),
+  ('ITALTILE_STORE', 2, 61, 101), ('ITALTILE_STORE', 3, 101, 151);
+
+insert into weight_bands (system, position, label, min_kg, max_kg, mode, is_ibt) values
+  ('ITALTILE_STORE', 0, '0-80 Kg', 0, 81, 'flat', false),
+  ('ITALTILE_STORE', 1, '81-300 Kg', 81, 301, 'flat', false),
+  ('ITALTILE_STORE', 2, '300-1000 Kg', 301, 1000, 'flat', false),
+  ('ITALTILE_STORE', 3, 'Over 1000 Kg (R/kg)', 1000, null, 'over_1000_surcharge', false);
+
+-- Italtile Webstore: same 4 distance bands as Stores (they share the same
+-- distance/rate structure once weight crosses 250kg). Weight bands are
+-- the webstore template's granular tiers under 250kg (priced the same
+-- regardless of distance — the upload parser fans each tier's single
+-- rate across all 4 distance-band cells), then 251-1000kg (which does
+-- vary by distance), then the over-1-ton surcharge.
+insert into distance_bands (system, position, min_km, max_km) values
+  ('ITALTILE_WEBSTORE', 0, 0, 31), ('ITALTILE_WEBSTORE', 1, 31, 61),
+  ('ITALTILE_WEBSTORE', 2, 61, 101), ('ITALTILE_WEBSTORE', 3, 101, 151);
+
+insert into weight_bands (system, position, label, min_kg, max_kg, mode, is_ibt) values
+  ('ITALTILE_WEBSTORE', 0, '0.11-4.99 Kg', 0.11, 5, 'flat', false),
+  ('ITALTILE_WEBSTORE', 1, '5-19.99 Kg', 5, 20, 'flat', false),
+  ('ITALTILE_WEBSTORE', 2, '20-29.99 Kg', 20, 30, 'flat', false),
+  ('ITALTILE_WEBSTORE', 3, '30-39.99 Kg', 30, 40, 'flat', false),
+  ('ITALTILE_WEBSTORE', 4, '40-49.99 Kg', 40, 50, 'flat', false),
+  ('ITALTILE_WEBSTORE', 5, '50-59.99 Kg', 50, 60, 'flat', false),
+  ('ITALTILE_WEBSTORE', 6, '60-69.99 Kg', 60, 70, 'flat', false),
+  ('ITALTILE_WEBSTORE', 7, '70-79.99 Kg', 70, 80, 'flat', false),
+  ('ITALTILE_WEBSTORE', 8, '80-89.99 Kg', 80, 90, 'flat', false),
+  ('ITALTILE_WEBSTORE', 9, '90-99.99 Kg', 90, 100, 'flat', false),
+  ('ITALTILE_WEBSTORE', 10, '100-250 Kg', 100, 250, 'flat', false),
+  ('ITALTILE_WEBSTORE', 11, '251-1000 Kg', 251, 1000, 'flat', false),
+  ('ITALTILE_WEBSTORE', 12, 'Over 1000 Kg (R/kg)', 1000, null, 'over_1000_surcharge', false);

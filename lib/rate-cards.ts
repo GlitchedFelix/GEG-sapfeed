@@ -1,4 +1,12 @@
-import type { RateCard, RateCardCell, RateCardDistanceBand, RateCardWeightBand } from '@/lib/types'
+import type { Brand, RateCard, RateCardCell, RateCardDistanceBand, RateCardWeightBand, RateSystem } from '@/lib/types'
+
+// Routes a delivery to its rate card system. CTM always uses the CTM
+// system; Italtile splits into its webstore (identified by store name)
+// vs every other physical store.
+export function getRateSystemForRow(brand: Brand, storeName: string | null): RateSystem {
+  if (brand === 'CTM') return 'CTM'
+  return storeName && /webstore/i.test(storeName) ? 'ITALTILE_WEBSTORE' : 'ITALTILE_STORE'
+}
 
 // Picks the rate card in force on a given delivery date: the one with the
 // latest effective_date that is still on/before that date.
@@ -64,4 +72,47 @@ export function computePayout(
   // IBT under 1 ton is billed as a full ton, never scaled down below the per-ton rate.
   const tons = Math.max(netWeightKg, 1000) / 1000
   return cell.amount_zar * tons
+}
+
+// Italtile's payout formula differs from CTM's: above 1000kg it's a flat
+// base charge (the top flat band's amount) plus a per-kg surcharge only on
+// the kg above 1000 — not a per-ton multiplier applied to the whole weight.
+// Distances beyond the last band, or weight beyond 2 tonnes, are a custom
+// quote (no fallback formula, unlike CTM's long-distance rate) -> null.
+export function computeItaltilePayout(
+  card: RateCard,
+  distanceBands: RateCardDistanceBand[],
+  weightBands: RateCardWeightBand[],
+  cells: RateCardCell[],
+  distanceKm: number | null,
+  netWeightKg: number | null
+): number | null {
+  if (distanceKm == null || netWeightKg == null || netWeightKg > 2000) return null
+
+  const cardCells = cells.filter((c) => c.rate_card_id === card.id)
+
+  const distanceBand = distanceBands.find((b) => inBand(distanceKm, b.min_km, b.max_km))
+  if (!distanceBand) return null
+
+  const cellFor = (weightBandId: number) =>
+    cardCells.find((c) => c.weight_band_id === weightBandId && c.distance_band_id === distanceBand.id)
+
+  if (netWeightKg < 1000) {
+    const weightBand = weightBands.find((b) => b.mode === 'flat' && inBand(netWeightKg, b.min_kg, b.max_kg))
+    if (!weightBand) return null
+    const cell = cellFor(weightBand.id)
+    return cell ? cell.amount_zar : null
+  }
+
+  const topFlatBand = weightBands
+    .filter((b) => b.mode === 'flat' && b.max_kg === 1000)
+    .sort((a, b) => b.min_kg - a.min_kg)[0]
+  const surchargeBand = weightBands.find((b) => b.mode === 'over_1000_surcharge')
+  if (!topFlatBand || !surchargeBand) return null
+
+  const base = cellFor(topFlatBand.id)
+  const surcharge = cellFor(surchargeBand.id)
+  if (!base || !surcharge) return null
+
+  return base.amount_zar + (netWeightKg - 1000) * surcharge.amount_zar
 }

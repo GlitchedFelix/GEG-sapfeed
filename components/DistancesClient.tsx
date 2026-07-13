@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
-import { getApplicableRateCard, computePayout } from '@/lib/rate-cards'
+import { getApplicableRateCard, computePayout, computeItaltilePayout, getRateSystemForRow } from '@/lib/rate-cards'
 import type {
   Brand,
   DeliveryRecord,
@@ -22,6 +22,7 @@ interface Row extends Pick<
   | 'row_hash'
   | 'delivery_date'
   | 'billing_document'
+  | 'brand'
   | 'store_code'
   | 'store_name'
   | 'street'
@@ -39,6 +40,7 @@ const SELECT_FIELDS = [
   'row_hash',
   'delivery_date',
   'billing_document',
+  'brand',
   'store_code',
   'store_name',
   'street',
@@ -98,19 +100,28 @@ export default function DistancesClient() {
   }, [supabase])
 
   function getPayout(row: Row): number | null {
-    const card = getApplicableRateCard(rateCards, row.delivery_date)
+    const system = getRateSystemForRow(row.brand, row.store_name)
+    const systemCards = rateCards.filter((c) => c.system === system)
+    const card = getApplicableRateCard(systemCards, row.delivery_date)
     if (!card) return null
-    return computePayout(
-      card,
-      distanceBands,
-      weightBands,
-      rateCells,
-      row.distance_km,
-      row.net_weight_kg,
-      // IBT rate selection is disabled until IBT is a properly supported
-      // delivery type — every delivery uses the standard (non-IBT) bands.
-      false
-    )
+
+    const systemDistanceBands = distanceBands.filter((b) => b.system === system)
+    const systemWeightBands = weightBands.filter((b) => b.system === system)
+
+    if (system === 'CTM') {
+      return computePayout(
+        card,
+        systemDistanceBands,
+        systemWeightBands,
+        rateCells,
+        row.distance_km,
+        row.net_weight_kg,
+        // IBT rate selection is disabled until IBT is a properly supported
+        // delivery type — every delivery uses the standard (non-IBT) bands.
+        false
+      )
+    }
+    return computeItaltilePayout(card, systemDistanceBands, systemWeightBands, rateCells, row.distance_km, row.net_weight_kg)
   }
 
   const applyFilters = useCallback(
