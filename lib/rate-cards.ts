@@ -41,9 +41,12 @@ export function computePayout(
     return distanceKm * card.long_distance_rate_zar_per_km
   }
 
-  const weightBand = isIbt
-    ? weightBands.find((b) => b.is_ibt)
-    : weightBands.find((b) => !b.is_ibt && inBand(netWeightKg, b.min_kg, b.max_kg))
+  // Under 1 ton always uses the flat weight-band rate, regardless of IBT status.
+  // IBT only distinguishes which per-ton rate applies once weight reaches 1 ton.
+  const weightBand =
+    netWeightKg >= 1000
+      ? weightBands.find((b) => b.mode === 'per_ton' && b.is_ibt === isIbt)
+      : weightBands.find((b) => b.mode === 'flat' && inBand(netWeightKg, b.min_kg, b.max_kg))
   if (!weightBand) return null
 
   const distanceBand = distanceBands.find((b) => inBand(distanceKm, b.min_km, b.max_km))
