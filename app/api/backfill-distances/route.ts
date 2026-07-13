@@ -48,19 +48,29 @@ export async function GET(request: NextRequest) {
   // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
   // Using customer_lat IS NULL + geocode_failed=false as the sentinel so rows
   // aren't re-processed once Nominatim has already failed for them.
+  // Rows lacking every address part (street/city/country all null) fall
+  // through to the addressParts.length === 0 check below and get marked
+  // geocode_failed permanently — they must stay in this query's candidate
+  // set (not filtered out by requiring city specifically) or they'd never
+  // be attempted, never get a sentinel, and sit as invisible "pending" rows
+  // forever since the remaining-count queries below exclude them too.
   const { data: ungeocodedRows } = await supabase
     .from('deliveries')
     .select('row_hash, store_code, brand, street, city, country')
     .is('customer_lat', null)
     .eq('geocode_failed', false)
-    .not('city', 'is', null)
     .limit(batchSize)
 
   pass1Found = (ungeocodedRows ?? []).length
 
   for (const row of (ungeocodedRows ?? [])) {
     const addressParts = [row.street, row.city, row.country].filter(Boolean)
-    if (addressParts.length === 0) {
+    // A city is the minimum viable signal for a useful geocode — street/country
+    // alone geocode too vaguely to trust. Rows missing it (or every part) are
+    // marked permanently rather than silently skipped, so they get a sentinel
+    // instead of sitting invisible forever (excluded from every remaining-count
+    // query yet still shown as "pending" in the UI).
+    if (row.city == null || addressParts.length === 0) {
       const { error } = await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
       logWriteError(row.row_hash, error)
       continue
@@ -177,7 +187,6 @@ export async function GET(request: NextRequest) {
     .select('*', { count: 'exact', head: true })
     .is('customer_lat', null)
     .eq('geocode_failed', false)
-    .not('city', 'is', null)
 
   const { count: noDistance } = await supabase
     .from('deliveries')

@@ -22,6 +22,7 @@ const FAIL_REASON_LABELS: Record<string, string> = {
   no_route: 'No road route found',
   http_error: 'Mapping service error',
   rate_limited: 'Rate limited',
+  geocode_failed: 'Address could not be geocoded',
 }
 
 function failReasonLabel(reason: string | null): string {
@@ -172,27 +173,36 @@ export default function DistancesClient() {
     setRows((data as Row[]) || [])
     setTotalCount(count || 0)
 
-    // Count deliveries that are still awaiting a distance (will be retried by backfill)
+    // Count deliveries that are still awaiting a distance (will be retried by backfill).
+    // Excludes rows that permanently failed geocoding too — those will never get
+    // a customer_lat, so they'd otherwise sit in "pending" forever even though
+    // the backfill will never touch them again.
     const { count: noDistCount } = await applyFilters(
-      supabase.from('deliveries').select('*', { count: 'exact', head: true }).is('distance_km', null).eq('distance_failed', false)
+      supabase.from('deliveries').select('*', { count: 'exact', head: true })
+        .is('distance_km', null).eq('distance_failed', false).eq('geocode_failed', false)
     )
     setNullCount(noDistCount || 0)
 
-    // Count deliveries that permanently failed to get a distance (won't be retried automatically)
+    // Count deliveries that permanently failed to get a distance (won't be retried
+    // automatically) — either the address itself couldn't be geocoded, or the
+    // geocoded address couldn't get a driving distance.
     const { count: failedCount } = await applyFilters(
-      supabase.from('deliveries').select('*', { count: 'exact', head: true }).eq('distance_failed', true)
+      supabase.from('deliveries').select('*', { count: 'exact', head: true })
+        .or('distance_failed.eq.true,geocode_failed.eq.true')
     )
     setDistanceFailedCount(failedCount || 0)
 
     // Breakdown of failures by reason, so it's clear what's actionable (e.g. a
-    // missing store location) vs a dead end (no road route found).
+    // missing store location) vs a dead end (no road route found / no address).
     if (failedCount) {
       const { data: reasonRows } = await applyFilters(
-        supabase.from('deliveries').select('distance_fail_reason').eq('distance_failed', true)
+        supabase.from('deliveries').select('geocode_failed, distance_fail_reason')
+          .or('distance_failed.eq.true,geocode_failed.eq.true')
       )
       const counts = new Map<string | null, number>()
-      for (const r of (reasonRows as { distance_fail_reason: string | null }[] | null) ?? []) {
-        counts.set(r.distance_fail_reason, (counts.get(r.distance_fail_reason) ?? 0) + 1)
+      for (const r of (reasonRows as { geocode_failed: boolean; distance_fail_reason: string | null }[] | null) ?? []) {
+        const reason = r.geocode_failed ? 'geocode_failed' : r.distance_fail_reason
+        counts.set(reason, (counts.get(reason) ?? 0) + 1)
       }
       setFailedByReason(
         Array.from(counts.entries())
