@@ -159,15 +159,22 @@ export default function DistancesClient() {
 
   useEffect(() => {
     async function loadStores() {
-      let q = supabase.from('deliveries').select('store_code, store_name').limit(1000)
-      if (brand !== 'ALL') q = q.eq('brand', brand)
-      const { data } = await q
       const seen = new Map<string, string>()
-      for (const r of (data || []) as any[]) {
-        if (!seen.has(r.store_code)) {
-          const { code, name } = parseStoreName(r.store_name ?? '')
-          seen.set(r.store_code, `${code || r.store_code} — ${name}`)
+      const PAGE = 1000
+      let offset = 0
+      while (true) {
+        let q = supabase.from('deliveries').select('store_code, store_name').range(offset, offset + PAGE - 1)
+        if (brand !== 'ALL') q = q.eq('brand', brand)
+        const { data } = await q
+        if (!data || data.length === 0) break
+        for (const r of data as any[]) {
+          if (!seen.has(r.store_code)) {
+            const { code, name } = parseStoreName(r.store_name ?? '')
+            seen.set(r.store_code, `${code || r.store_code} — ${name}`)
+          }
         }
+        if (data.length < PAGE) break
+        offset += PAGE
       }
       const opts = Array.from(seen.entries())
         .map(([value, label]) => ({ value, label }))
