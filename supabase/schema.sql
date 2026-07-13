@@ -163,3 +163,101 @@ alter table deliveries
   add column if not exists customer_lon    double precision,
   add column if not exists distance_km     double precision,
   add column if not exists geocode_failed  boolean not null default false;
+
+-- ---------------------------------------------------------------------
+-- 6. Rate cards feature migration.
+--    Effective-dated payout grids: distance bands (columns) x weight
+--    bands (rows) -> a ZAR amount per cell. A delivery's payout uses
+--    whichever rate card has the latest effective_date on/before its
+--    own delivery_date. Weight bands below 1 ton store a flat payout;
+--    "1 Ton+" and IBT bands store a rate per ton, multiplied by the
+--    delivery's actual weight in tons. Distances beyond the last band
+--    fall back to rate_cards.long_distance_rate_zar_per_km * distance_km.
+-- ---------------------------------------------------------------------
+
+create table if not exists rate_cards (
+  id                              bigserial primary key,
+  effective_date                  date not null unique,
+  label                           text,
+  long_distance_rate_zar_per_km   numeric not null default 26,
+  created_at                      timestamptz not null default now()
+);
+
+-- Columns of the grid: distance bands, in left-to-right order.
+create table if not exists rate_card_distance_bands (
+  id            bigserial primary key,
+  rate_card_id  bigint not null references rate_cards(id) on delete cascade,
+  position      int not null,
+  min_km        numeric not null default 0,
+  max_km        numeric -- null = no upper bound
+);
+
+-- Rows of the grid: weight bands, in top-to-bottom order.
+create table if not exists rate_card_weight_bands (
+  id            bigserial primary key,
+  rate_card_id  bigint not null references rate_cards(id) on delete cascade,
+  position      int not null,
+  label         text not null, -- e.g. "0-20 Kgs", "1 Ton+", "IBT per Ton"
+  min_kg        numeric not null default 0,
+  max_kg        numeric, -- null = no upper bound
+  mode          text not null check (mode in ('flat', 'per_ton')),
+  is_ibt        boolean not null default false -- matched by delivery IBT flag, not weight
+);
+
+-- Cells of the grid: one ZAR amount per (weight band, distance band) pair.
+-- Meaning of the amount depends on the weight band's mode:
+--   'flat'    -> use amount_zar directly as the payout
+--   'per_ton' -> payout = amount_zar * (net_weight_kg / 1000)
+create table if not exists rate_card_cells (
+  id                bigserial primary key,
+  rate_card_id      bigint not null references rate_cards(id) on delete cascade,
+  weight_band_id    bigint not null references rate_card_weight_bands(id) on delete cascade,
+  distance_band_id  bigint not null references rate_card_distance_bands(id) on delete cascade,
+  amount_zar        numeric not null,
+  unique (weight_band_id, distance_band_id)
+);
+
+create index idx_rate_card_distance_bands_card on rate_card_distance_bands(rate_card_id);
+create index idx_rate_card_weight_bands_card on rate_card_weight_bands(rate_card_id);
+create index idx_rate_card_cells_card on rate_card_cells(rate_card_id);
+
+alter table rate_cards enable row level security;
+alter table rate_card_distance_bands enable row level security;
+alter table rate_card_weight_bands enable row level security;
+alter table rate_card_cells enable row level security;
+
+create policy "Authenticated users can view rate cards"
+  on rate_cards for select to authenticated using (true);
+create policy "Authenticated users can insert rate cards"
+  on rate_cards for insert to authenticated with check (true);
+create policy "Authenticated users can update rate cards"
+  on rate_cards for update to authenticated using (true);
+create policy "Authenticated users can delete rate cards"
+  on rate_cards for delete to authenticated using (true);
+
+create policy "Authenticated users can view rate card distance bands"
+  on rate_card_distance_bands for select to authenticated using (true);
+create policy "Authenticated users can insert rate card distance bands"
+  on rate_card_distance_bands for insert to authenticated with check (true);
+create policy "Authenticated users can update rate card distance bands"
+  on rate_card_distance_bands for update to authenticated using (true);
+create policy "Authenticated users can delete rate card distance bands"
+  on rate_card_distance_bands for delete to authenticated using (true);
+
+create policy "Authenticated users can view rate card weight bands"
+  on rate_card_weight_bands for select to authenticated using (true);
+create policy "Authenticated users can insert rate card weight bands"
+  on rate_card_weight_bands for insert to authenticated with check (true);
+create policy "Authenticated users can update rate card weight bands"
+  on rate_card_weight_bands for update to authenticated using (true);
+create policy "Authenticated users can delete rate card weight bands"
+  on rate_card_weight_bands for delete to authenticated using (true);
+
+create policy "Authenticated users can view rate card cells"
+  on rate_card_cells for select to authenticated using (true);
+create policy "Authenticated users can insert rate card cells"
+  on rate_card_cells for insert to authenticated with check (true);
+create policy "Authenticated users can update rate card cells"
+  on rate_card_cells for update to authenticated using (true);
+create policy "Authenticated users can delete rate card cells"
+  on rate_card_cells for delete to authenticated using (true);

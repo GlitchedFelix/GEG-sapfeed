@@ -3,7 +3,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
-import type { Brand, DeliveryRecord } from '@/lib/types'
+import { getApplicableRateCard, computePayout } from '@/lib/rate-cards'
+import type {
+  Brand,
+  DeliveryRecord,
+  RateCard,
+  RateCardDistanceBand,
+  RateCardWeightBand,
+  RateCardCell,
+} from '@/lib/types'
 
 type SortDir = 'asc' | 'desc'
 
@@ -19,9 +27,12 @@ interface Row extends Pick<
   | 'street'
   | 'city'
   | 'country'
+  | 'net_weight_kg'
   | 'distance_km'
   | 'transport1_amount_zar'
   | 'transport2_amount_zar'
+  | 'ibt_from'
+  | 'ibt_to'
 > {}
 
 const SELECT_FIELDS = [
@@ -33,9 +44,12 @@ const SELECT_FIELDS = [
   'street',
   'city',
   'country',
+  'net_weight_kg',
   'distance_km',
   'transport1_amount_zar',
   'transport2_amount_zar',
+  'ibt_from',
+  'ibt_to',
 ].join(',')
 
 export default function DistancesClient() {
@@ -59,6 +73,41 @@ export default function DistancesClient() {
   const [backfilling, setBackfilling] = useState(false)
   const [backfillRemaining, setBackfillRemaining] = useState<number | null>(null)
   const [backfillProcessed, setBackfillProcessed] = useState(0)
+
+  const [rateCards, setRateCards] = useState<RateCard[]>([])
+  const [distanceBands, setDistanceBands] = useState<RateCardDistanceBand[]>([])
+  const [weightBands, setWeightBands] = useState<RateCardWeightBand[]>([])
+  const [rateCells, setRateCells] = useState<RateCardCell[]>([])
+
+  useEffect(() => {
+    async function loadRateCards() {
+      const [cardsRes, distRes, weightRes, cellsRes] = await Promise.all([
+        supabase.from('rate_cards').select('*'),
+        supabase.from('rate_card_distance_bands').select('*'),
+        supabase.from('rate_card_weight_bands').select('*'),
+        supabase.from('rate_card_cells').select('*'),
+      ])
+      setRateCards((cardsRes.data as RateCard[]) || [])
+      setDistanceBands((distRes.data as RateCardDistanceBand[]) || [])
+      setWeightBands((weightRes.data as RateCardWeightBand[]) || [])
+      setRateCells((cellsRes.data as RateCardCell[]) || [])
+    }
+    loadRateCards()
+  }, [supabase])
+
+  function getPayout(row: Row): number | null {
+    const card = getApplicableRateCard(rateCards, row.delivery_date)
+    if (!card) return null
+    return computePayout(
+      card,
+      distanceBands,
+      weightBands,
+      rateCells,
+      row.distance_km,
+      row.net_weight_kg,
+      !!(row.ibt_from || row.ibt_to)
+    )
+  }
 
   const applyFilters = useCallback(
     (query: any) => {
@@ -177,9 +226,11 @@ export default function DistancesClient() {
     { key: 'billing_document', label: 'Billing Document', sortable: true },
     { key: 'store_code', label: 'Store', sortable: true },
     { key: 'address', label: 'To Address', sortable: false },
+    { key: 'net_weight_kg', label: 'Net Weight (kg)', sortable: true },
     { key: 'distance_km', label: 'Distance (km)', sortable: true },
     { key: 'transport1_amount_zar', label: 'Transport 1', sortable: true },
     { key: 'transport2_amount_zar', label: 'Transport 2', sortable: true },
+    { key: 'payout', label: 'Payout', sortable: false },
   ]
 
   return (
@@ -322,11 +373,15 @@ export default function DistancesClient() {
                   <td className="px-2 py-1 text-slate-700">
                     {[row.street, row.city, row.country].filter(Boolean).join(', ') || '—'}
                   </td>
+                  <td className="whitespace-nowrap px-2 py-1 text-slate-700">
+                    {row.net_weight_kg != null ? `${row.net_weight_kg} kg` : '—'}
+                  </td>
                   <td className="whitespace-nowrap px-2 py-1 font-semibold text-slate-900">
                     {row.distance_km != null ? `${row.distance_km} km` : '—'}
                   </td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{formatZar(row.transport1_amount_zar)}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-slate-700">{formatZar(row.transport2_amount_zar)}</td>
+                  <td className="whitespace-nowrap px-2 py-1 font-semibold text-slate-900">{formatZar(getPayout(row))}</td>
                 </tr>
               ))
             )}

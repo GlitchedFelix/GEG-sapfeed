@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
+import RateCardsSection from '@/components/RateCardsSection'
 import type { Brand } from '@/lib/types'
 
 interface StoreRow {
@@ -225,6 +226,8 @@ export default function SettingsClient() {
           </div>
         )}
       </section>
+
+      <RateCardsSection />
     </main>
   )
 }

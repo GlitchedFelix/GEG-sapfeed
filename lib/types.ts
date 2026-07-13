@@ -38,3 +38,37 @@ export interface ImportResult {
   duplicates: number
   errors: string[]
 }
+
+export interface RateCard {
+  id: number
+  effective_date: string
+  label: string | null
+  long_distance_rate_zar_per_km: number
+}
+
+export interface RateCardDistanceBand {
+  id: number
+  rate_card_id: number
+  position: number
+  min_km: number
+  max_km: number | null
+}
+
+export interface RateCardWeightBand {
+  id: number
+  rate_card_id: number
+  position: number
+  label: string
+  min_kg: number
+  max_kg: number | null
+  mode: 'flat' | 'per_ton'
+  is_ibt: boolean
+}
+
+export interface RateCardCell {
+  id: number
+  rate_card_id: number
+  weight_band_id: number
+  distance_band_id: number
+  amount_zar: number
+}
