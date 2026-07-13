@@ -132,7 +132,7 @@ export default function SettingsClient() {
   const configured = visible.filter((s) => s.saved).length
 
   return (
-    <main className="px-4 py-4 max-w-3xl">
+    <main className="px-4 py-4 max-w-6xl">
       <h2 className="text-sm font-semibold text-slate-800 mb-1">Settings</h2>
 
       <CollapsibleSection
