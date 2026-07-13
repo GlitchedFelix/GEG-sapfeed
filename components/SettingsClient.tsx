@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
 import RateCardsSection from '@/components/RateCardsSection'
+import CollapsibleSection from '@/components/CollapsibleSection'
 import type { Brand } from '@/lib/types'
 
 interface StoreRow {
@@ -134,13 +135,12 @@ export default function SettingsClient() {
     <main className="px-4 py-4 max-w-3xl">
       <h2 className="text-sm font-semibold text-slate-800 mb-1">Settings</h2>
 
-      <section className="mt-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-          Geocoding — Store Coordinates
-        </h3>
+      <CollapsibleSection
+        title="Geocoding — Store Coordinates"
+        subtitle="Driving distances require a latitude and longitude for each store."
+      >
         <p className="text-xs text-slate-500 mb-3">
-          Driving distances require a latitude and longitude for each store. Paste coordinates
-          from Google Maps (right-click a location → copy lat/lng).
+          Paste coordinates from Google Maps (right-click a location → copy lat/lng).
         </p>
 
         <div className="mb-3 flex items-center gap-1">
@@ -225,9 +225,14 @@ export default function SettingsClient() {
             </table>
           </div>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <RateCardsSection />
+      <CollapsibleSection
+        title="Rate Cards"
+        subtitle="Payout grids by distance and weight, effective-dated per delivery."
+      >
+        <RateCardsSection />
+      </CollapsibleSection>
     </main>
   )
 }

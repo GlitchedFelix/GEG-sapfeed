@@ -272,14 +272,7 @@ export default function RateCardsSection() {
   }
 
   return (
-    <section className="mt-6">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Rate Cards</h3>
-      <p className="text-xs text-slate-500 mb-3">
-        Payout grids keyed by distance band (columns) and net weight band (rows). Each rate card
-        takes effect from its effective date (past or future) onward — a delivery uses whichever
-        rate card has the latest effective date on or before its own delivery date.
-      </p>
-
+    <>
       <div className="mb-3 flex flex-wrap items-center gap-1">
         {loadingCards ? (
           <span className="text-xs text-slate-400">Loading rate cards…</span>
@@ -476,6 +469,6 @@ export default function RateCardsSection() {
           )}
         </div>
       )}
-    </section>
+    </>
   )
 }
