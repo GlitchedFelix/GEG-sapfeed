@@ -69,6 +69,7 @@ export default function DistancesClient() {
   const [nullCount, setNullCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const [backfilling, setBackfilling] = useState(false)
   const [backfillRemaining, setBackfillRemaining] = useState<number | null>(null)
@@ -195,9 +196,14 @@ export default function DistancesClient() {
         const remainingGeocode: number = json.remainingGeocode ?? remaining
         const remainingDistance: number = json.remainingDistance ?? 0
         const exhausted: boolean = json.exhausted ?? false
+        const writeErrors: string[] = json.errors ?? []
         totalProcessed += processed
         setBackfillProcessed(totalProcessed)
         setBackfillRemaining(remaining)
+        if (writeErrors.length > 0) {
+          setError(`Backfill write failed: ${writeErrors[0]}`)
+          break
+        }
         if (remaining === 0) break
         if (exhausted && remainingGeocode === 0 && remainingDistance > 0) {
           // All geocodable addresses done but store coords missing for remaining rows
@@ -215,6 +221,79 @@ export default function DistancesClient() {
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
+  }
+
+  // Wraps a cell in double quotes only when it contains a comma, quote, or newline;
+  // doubles any internal double-quotes per RFC 4180.
+  function csvEscape(s: string): string {
+    if (/[,"\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+
+  const EXPORT_COLS = [
+    'Date', 'Billing Document', 'Store Code', 'Store Name', 'Street', 'City', 'Country',
+    'Net Weight (kg)', 'Distance (km)', 'Transport 1', 'Transport 2', 'Payout',
+  ]
+
+  async function exportCsv() {
+    if (totalCount === 0) return
+    setExporting(true)
+    setError(null)
+    try {
+      const allRows: Row[] = []
+      const BATCH = 1000
+
+      // Supabase silently caps un-ranged queries at 1000 rows, so we page
+      // through in batches of 1000 until a batch comes back short.
+      let offset = 0
+      while (true) {
+        let q = applyFilters(
+          supabase.from('deliveries').select(SELECT_FIELDS).not('distance_km', 'is', null)
+        )
+        q = q.order(sortKey, { ascending: sortDir === 'asc' }).range(offset, offset + BATCH - 1)
+        const { data, error: fetchError } = await q
+        if (fetchError) {
+          setError(fetchError.message)
+          return
+        }
+        if (data && data.length > 0) allRows.push(...(data as Row[]))
+        if (!data || data.length < BATCH) break
+        offset += BATCH
+      }
+
+      const header = EXPORT_COLS.map(csvEscape).join(',')
+      const body = allRows.map((row) => {
+        const { code, name } = parseStoreName(row.store_name ?? '')
+        const cells = [
+          row.delivery_date ?? '',
+          row.billing_document ?? '',
+          code || row.store_code,
+          name || row.store_name,
+          row.street ?? '',
+          row.city ?? '',
+          row.country ?? '',
+          row.net_weight_kg ?? '',
+          row.distance_km ?? '',
+          row.transport1_amount_zar ?? '',
+          row.transport2_amount_zar ?? '',
+          getPayout(row) ?? '',
+        ]
+        return cells.map((c) => csvEscape(String(c))).join(',')
+      })
+      // UTF-8 BOM ensures Excel auto-detects encoding and renders accented text correctly.
+      const csv = '﻿' + [header, ...body].join('\r\n')
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const today = new Date().toISOString().slice(0, 10)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `distances-${today}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
@@ -315,6 +394,16 @@ export default function DistancesClient() {
                 : 'Backfill distances'}
             </button>
           )}
+        </div>
+
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={exportCsv}
+            disabled={exporting || totalCount === 0}
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          >
+            {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
         </div>
       </div>
 
