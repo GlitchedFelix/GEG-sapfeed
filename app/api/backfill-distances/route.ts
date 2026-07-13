@@ -98,7 +98,8 @@ export async function GET(request: NextRequest) {
     const storeLoc = await getStoreLoc(row.store_code)
     let distanceKm: number | null = null
     if (storeLoc) {
-      distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon })
+      const distanceResult = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon })
+      if ('km' in distanceResult) distanceKm = distanceResult.km
     }
 
     const { error: updateError } = await supabase
@@ -111,32 +112,57 @@ export async function GET(request: NextRequest) {
   }
 
   // --- Pass 2: compute distances for rows already geocoded but missing distance ---
-  // This runs after store coords are manually added in Settings — no geocoding
-  // needed here, just OSRM calls, so it's fast with no sleep required.
+  // This runs after store coords are manually added in Settings.
+  let rateLimited = 0
   if (pass1Found === 0) {
     const { data: pendingRows } = await supabase
       .from('deliveries')
       .select('row_hash, store_code, customer_lat, customer_lon')
       .is('distance_km', null)
       .not('customer_lat', 'is', null)
+      .eq('distance_failed', false)
+      .order('row_hash')
       .limit(batchSize)
 
     pass2Found = (pendingRows ?? []).length
 
     for (const row of (pendingRows ?? [])) {
       if (row.customer_lat == null) continue
-      const storeLoc = await getStoreLoc(row.store_code)
-      if (!storeLoc) continue
 
-      const distanceKm = await getDrivingDistanceKm(
+      const storeLoc = await getStoreLoc(row.store_code)
+      if (!storeLoc) {
+        const { error: updateError } = await supabase
+          .from('deliveries')
+          .update({ distance_failed: true, distance_fail_reason: 'no_store_location' })
+          .eq('row_hash', row.row_hash)
+        logWriteError(row.row_hash, updateError)
+        continue
+      }
+
+      const distanceResult = await getDrivingDistanceKm(
         storeLoc,
         { lat: row.customer_lat, lon: row.customer_lon }
       )
-      if (distanceKm == null) continue
+      await sleep(150)
+
+      if ('error' in distanceResult) {
+        if (distanceResult.error === 'rate_limited') {
+          // Transient — don't mark permanently failed, just stop this batch
+          // early so we don't burn through more calls the API will also reject.
+          rateLimited++
+          break
+        }
+        const { error: updateError } = await supabase
+          .from('deliveries')
+          .update({ distance_failed: true, distance_fail_reason: distanceResult.error })
+          .eq('row_hash', row.row_hash)
+        logWriteError(row.row_hash, updateError)
+        continue
+      }
 
       const { error: updateError } = await supabase
         .from('deliveries')
-        .update({ distance_km: distanceKm })
+        .update({ distance_km: distanceResult.km })
         .eq('row_hash', row.row_hash)
       logWriteError(row.row_hash, updateError)
 
@@ -144,7 +170,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Remaining = rows with no customer_lat (not yet geocoded) + rows geocoded but no distance
+  // Remaining = rows with no customer_lat (not yet geocoded) + rows geocoded but
+  // still eligible for a distance attempt (excludes permanently-failed rows).
   const { count: noCoords } = await supabase
     .from('deliveries')
     .select('*', { count: 'exact', head: true })
@@ -157,12 +184,20 @@ export async function GET(request: NextRequest) {
     .select('*', { count: 'exact', head: true })
     .is('distance_km', null)
     .not('customer_lat', 'is', null)
+    .eq('distance_failed', false)
+
+  const { count: distanceFailed } = await supabase
+    .from('deliveries')
+    .select('*', { count: 'exact', head: true })
+    .eq('distance_failed', true)
 
   return NextResponse.json({
     processed,
     remainingGeocode: noCoords ?? 0,
     remainingDistance: noDistance ?? 0,
     remaining: (noCoords ?? 0) + (noDistance ?? 0),
+    distanceFailed: distanceFailed ?? 0,
+    rateLimited,
     // True only when both passes found zero rows to attempt — caller should stop.
     exhausted: pass1Found === 0 && pass2Found === 0,
     errors,

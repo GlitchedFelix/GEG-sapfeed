@@ -159,10 +159,12 @@ create policy "Authenticated users can update store locations"
 
 -- New columns on deliveries for geocoded customer address + driving distance.
 alter table deliveries
-  add column if not exists customer_lat    double precision,
-  add column if not exists customer_lon    double precision,
-  add column if not exists distance_km     double precision,
-  add column if not exists geocode_failed  boolean not null default false;
+  add column if not exists customer_lat        double precision,
+  add column if not exists customer_lon        double precision,
+  add column if not exists distance_km         double precision,
+  add column if not exists geocode_failed      boolean not null default false,
+  add column if not exists distance_failed     boolean not null default false,
+  add column if not exists distance_fail_reason text;
 
 -- ---------------------------------------------------------------------
 -- 6. Rate cards feature migration.

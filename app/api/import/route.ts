@@ -133,7 +133,8 @@ export async function POST(request: NextRequest) {
       // 3. Calculate driving distance
       let distanceKm: number | null = null
       if (storeLoc) {
-        distanceKm = await getDrivingDistanceKm(storeLoc, { lat: customerGeo.lat, lon: customerGeo.lon })
+        const distanceResult = await getDrivingDistanceKm(storeLoc, { lat: customerGeo.lat, lon: customerGeo.lon })
+        if ('km' in distanceResult) distanceKm = distanceResult.km
       }
 
       // 4. Persist coordinates + distance back onto the delivery row

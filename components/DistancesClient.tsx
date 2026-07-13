@@ -67,6 +67,7 @@ export default function DistancesClient() {
   const [rows, setRows] = useState<Row[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [nullCount, setNullCount] = useState(0)
+  const [distanceFailedCount, setDistanceFailedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -146,11 +147,17 @@ export default function DistancesClient() {
     setRows((data as Row[]) || [])
     setTotalCount(count || 0)
 
-    // Count deliveries that have no distance yet (geocoding pending or failed)
+    // Count deliveries that are still awaiting a distance (will be retried by backfill)
     const { count: noDistCount } = await applyFilters(
-      supabase.from('deliveries').select('*', { count: 'exact', head: true }).is('distance_km', null)
+      supabase.from('deliveries').select('*', { count: 'exact', head: true }).is('distance_km', null).eq('distance_failed', false)
     )
     setNullCount(noDistCount || 0)
+
+    // Count deliveries that permanently failed to get a distance (won't be retried automatically)
+    const { count: failedCount } = await applyFilters(
+      supabase.from('deliveries').select('*', { count: 'exact', head: true }).eq('distance_failed', true)
+    )
+    setDistanceFailedCount(failedCount || 0)
 
     setLoading(false)
   }, [applyFilters, sortKey, sortDir, page, supabase])
@@ -195,31 +202,48 @@ export default function DistancesClient() {
     setBackfilling(true)
     setBackfillProcessed(0)
     let totalProcessed = 0
+    let finalDistanceFailed = 0
+    let hadBlockingError = false
     try {
       while (true) {
         const res = await fetch('/api/backfill-distances?batch=10')
-        if (!res.ok) { setError('Backfill request failed'); break }
+        if (!res.ok) { setError('Backfill request failed'); hadBlockingError = true; break }
         const json = await res.json()
         const processed: number = json.processed
         const remaining: number = json.remaining
         const remainingGeocode: number = json.remainingGeocode ?? remaining
         const remainingDistance: number = json.remainingDistance ?? 0
         const exhausted: boolean = json.exhausted ?? false
+        const distanceFailed: number = json.distanceFailed ?? 0
+        const rateLimited: number = json.rateLimited ?? 0
         const writeErrors: string[] = json.errors ?? []
         totalProcessed += processed
+        finalDistanceFailed = distanceFailed
         setBackfillProcessed(totalProcessed)
         setBackfillRemaining(remaining)
         if (writeErrors.length > 0) {
           setError(`Backfill write failed: ${writeErrors[0]}`)
+          hadBlockingError = true
           break
         }
         if (remaining === 0) break
         if (exhausted && remainingGeocode === 0 && remainingDistance > 0) {
           // All geocodable addresses done but store coords missing for remaining rows
           setError(`${remainingDistance} deliveries geocoded but need store coordinates. Add them in the Settings tab, then run backfill again.`)
+          hadBlockingError = true
           break
         }
         if (exhausted) break
+        if (rateLimited > 0) {
+          // Mapping service is rate-limiting us — back off before the next batch.
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+      }
+      if (!hadBlockingError && finalDistanceFailed > 0) {
+        setError(
+          `${finalDistanceFailed} deliveries could not get an automatic distance ` +
+          `(no matching store location or no road route found) and were skipped.`
+        )
       }
     } finally {
       setBackfilling(false)
@@ -390,6 +414,9 @@ export default function DistancesClient() {
             <span className="font-semibold text-slate-900">{totalCount}</span> with distance
             {nullCount > 0 && (
               <span className="ml-2 text-amber-600">{nullCount} pending</span>
+            )}
+            {distanceFailedCount > 0 && (
+              <span className="ml-2 text-red-600">{distanceFailedCount} failed</span>
             )}
           </span>
           {nullCount > 0 && (
