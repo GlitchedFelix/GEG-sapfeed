@@ -493,3 +493,20 @@ where d.city = g.city
 
 -- Then click "Backfill distances" in the Distances tab to re-geocode
 -- the reset rows individually through the fixed code path.
+
+-- ---------------------------------------------------------------------
+-- 10. One-time data fix: un-stick rows wrongly marked geocode_failed.
+--    geocodeStructuredAddress's country sanity check compared the raw
+--    SAP country value (often a short code like "ZA") against Nominatim's
+--    full country name ("South Africa") and rejected almost every match,
+--    so an early backfill run marked most pending rows geocode_failed
+--    with zero successful geocodes. The check now also matches against
+--    Nominatim's ISO country code, but rows already marked failed by the
+--    bug need their flag cleared to be retried under the fixed code.
+--    Safe to run even if some of these were genuine failures — they'll
+--    just be marked failed again.
+-- ---------------------------------------------------------------------
+
+update deliveries
+set geocode_failed = false
+where geocode_failed = true and customer_lat is null;
