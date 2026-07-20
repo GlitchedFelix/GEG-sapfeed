@@ -437,3 +437,59 @@ insert into weight_bands (system, position, label, min_kg, max_kg, mode, is_ibt)
   ('ITALTILE_WEBSTORE', 10, '100-250 Kg', 100, 250, 'flat', false),
   ('ITALTILE_WEBSTORE', 11, '251-1000 Kg', 251, 1000, 'flat', false),
   ('ITALTILE_WEBSTORE', 12, 'Over 1000 Kg (R/kg)', 1000, null, 'over_1000_surcharge', false);
+
+-- ---------------------------------------------------------------------
+-- 9. One-time data fix: reset "twin" city/country coordinate reuse.
+--    backfill-distances used to skip geocoding a delivery if another row
+--    in the same city+country already had customer_lat/customer_lon, and
+--    just copied those coordinates instead. That collapsed every customer
+--    in a city onto one point, corrupting distance_km for any row that
+--    wasn't the first one geocoded in its city. The app code no longer
+--    does this — every row is now geocoded from its own street address —
+--    but rows that already got a copied coordinate need to be reset so
+--    the backfill job re-geocodes them individually.
+-- ---------------------------------------------------------------------
+
+-- Run this first and review the row count: it lists delivery rows that
+-- share an identical (city, country, customer_lat, customer_lon) with at
+-- least one other row. Two independently geocoded street addresses
+-- landing on bit-identical lat/lon is effectively impossible, so a group
+-- like this is the signature of the old twin-reuse shortcut.
+select city, country, customer_lat, customer_lon, count(*) as row_count
+from deliveries
+where city is not null and country is not null
+  and customer_lat is not null and customer_lon is not null
+group by city, country, customer_lat, customer_lon
+having count(*) > 1
+order by row_count desc;
+
+-- After reviewing the above, run this to reset every row in an affected
+-- group (not just the "copies" — there's no reliable way to tell which
+-- row in a group was the original vs. a copy, and re-geocoding a row
+-- that was already correct just costs one harmless extra Nominatim
+-- call). Resetting geocode_failed/distance_failed back to false is
+-- required, otherwise these rows would be silently excluded from the
+-- backfill job's candidate queries and never reprocessed.
+with twin_groups as (
+  select city, country, customer_lat, customer_lon
+  from deliveries
+  where city is not null and country is not null
+    and customer_lat is not null and customer_lon is not null
+  group by city, country, customer_lat, customer_lon
+  having count(*) > 1
+)
+update deliveries d
+set customer_lat = null,
+    customer_lon = null,
+    distance_km = null,
+    geocode_failed = false,
+    distance_failed = false,
+    distance_fail_reason = null
+from twin_groups g
+where d.city = g.city
+  and d.country = g.country
+  and d.customer_lat = g.customer_lat
+  and d.customer_lon = g.customer_lon;
+
+-- Then click "Backfill distances" in the Distances tab to re-geocode
+-- the reset rows individually through the fixed code path.

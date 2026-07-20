@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { parseSapExport } from '@/lib/sap-parser'
-import { geocodeAddress } from '@/lib/geocoding'
+import { geocodeAddress, geocodeStructuredAddress } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
 import type { ImportResult } from '@/lib/types'
 
@@ -127,7 +127,11 @@ export async function POST(request: NextRequest) {
       if (addressParts.length === 0) continue
 
       await sleep(1100)  // Nominatim ToS: max 1 req/sec
-      const customerGeo = await geocodeAddress(addressParts.join(', '))
+      const customerGeo = await geocodeStructuredAddress({
+        street: record.street,
+        city: record.city,
+        country: record.country,
+      })
       if (!customerGeo) continue
 
       // 3. Calculate driving distance

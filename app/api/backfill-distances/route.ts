@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
-import { geocodeAddress } from '@/lib/geocoding'
+import { geocodeStructuredAddress } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
 
 export const runtime = 'nodejs'
@@ -13,9 +13,12 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
 
+  // Every row in the batch now always costs a full Nominatim round-trip
+  // (no more coordinate reuse), so the cap is kept well under the 55s
+  // maxDuration even in the worst case.
   const batchSize = Math.min(
     parseInt(request.nextUrl.searchParams.get('batch') ?? '10', 10),
-    25
+    15
   )
 
   // Cache store coords within this call
@@ -76,34 +79,19 @@ export async function GET(request: NextRequest) {
       continue
     }
 
-    // Reuse coords from another delivery going to the same city/country
-    const { data: twin } = await supabase
-      .from('deliveries')
-      .select('customer_lat, customer_lon')
-      .eq('city', row.city)
-      .eq('country', row.country ?? '')
-      .not('customer_lat', 'is', null)
-      .limit(1)
-      .maybeSingle()
-
-    let customerLat: number
-    let customerLon: number
-
-    if (twin?.customer_lat != null) {
-      customerLat = twin.customer_lat
-      customerLon = twin.customer_lon
-    } else {
-      await sleep(1100)
-      const geo = await geocodeAddress(addressParts.join(', '))
-      if (!geo) {
-        // Mark permanently so this row is never re-fetched by the backfill.
-        const { error } = await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
-        logWriteError(row.row_hash, error)
-        continue
-      }
-      customerLat = geo.lat
-      customerLon = geo.lon
+    // Every row is geocoded from its own street address — no coordinate
+    // reuse across rows, even within the same city/country, since two
+    // addresses in the same city can be kilometers apart.
+    await sleep(1100)
+    const geo = await geocodeStructuredAddress({ street: row.street, city: row.city, country: row.country })
+    if (!geo) {
+      // Mark permanently so this row is never re-fetched by the backfill.
+      const { error } = await supabase.from('deliveries').update({ geocode_failed: true }).eq('row_hash', row.row_hash)
+      logWriteError(row.row_hash, error)
+      continue
     }
+    const customerLat = geo.lat
+    const customerLon = geo.lon
 
     const storeLoc = await getStoreLoc(row.store_code)
     let distanceKm: number | null = null
