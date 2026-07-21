@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
 import RateCardsSection from '@/components/RateCardsSection'
 import CollapsibleSection from '@/components/CollapsibleSection'
+import Button from '@/components/ui/Button'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import type { Brand } from '@/lib/types'
 
 interface StoreRow {
@@ -132,31 +135,29 @@ export default function SettingsClient() {
   const configured = visible.filter((s) => s.saved).length
 
   return (
-    <main className="px-4 py-4 max-w-6xl">
-      <h2 className="text-sm font-semibold text-slate-800 mb-1">Settings</h2>
+    <main className="mx-auto max-w-6xl px-4 py-5">
+      <h2 className="mb-3 text-sm font-semibold text-slate-800">Settings</h2>
 
       <CollapsibleSection
         title="Geocoding — Store Coordinates"
         subtitle="Driving distances require a latitude and longitude for each store."
       >
-        <p className="text-xs text-slate-500 mb-3">
+        <p className="mb-3 text-xs text-slate-500">
           Paste coordinates from Google Maps (right-click a location → copy lat/lng).
         </p>
 
-        <div className="mb-3 flex items-center gap-1">
-          {(['ALL', 'CTM', 'ITALTILE'] as const).map((b) => (
-            <button
-              key={b}
-              onClick={() => setBrandFilter(b)}
-              className={`rounded px-2 py-1 text-xs font-medium ${
-                brandFilter === b ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {b === 'ALL' ? 'All' : b}
-            </button>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <SegmentedControl
+            options={[
+              { value: 'ALL' as const, label: 'All' },
+              { value: 'CTM' as const, label: 'CTM' },
+              { value: 'ITALTILE' as const, label: 'Italtile' },
+            ]}
+            value={brandFilter}
+            onChange={setBrandFilter}
+          />
           {!loading && (
-            <span className="ml-2 text-xs text-slate-400">
+            <span className="text-xs text-slate-400">
               {configured}/{visible.length} stores configured
             </span>
           )}
@@ -165,21 +166,21 @@ export default function SettingsClient() {
         {loading ? (
           <p className="text-xs text-slate-400">Loading stores…</p>
         ) : (
-          <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
-            <table className="w-full text-xs">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-card scrollbar-thin">
+            <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-20">Code</th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-600">Store Name</th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-16">Brand</th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-36">Latitude</th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-600 w-36">Longitude</th>
-                  <th className="px-3 py-2 w-24" />
+                <tr className="border-b border-slate-200 bg-slate-50/80">
+                  <th className="w-20 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Code</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Store Name</th>
+                  <th className="w-16 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Brand</th>
+                  <th className="w-36 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Latitude</th>
+                  <th className="w-36 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Longitude</th>
+                  <th className="w-24 px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {visible.map((store) => (
-                  <tr key={store.store_code} className="border-b border-slate-100 last:border-0">
+                  <tr key={store.store_code} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
                     <td className="px-3 py-1.5 font-mono font-medium text-slate-800">
                       {store.display_code || store.store_code}
                     </td>
@@ -191,7 +192,7 @@ export default function SettingsClient() {
                         value={store.lat}
                         onChange={(e) => update(store.store_code, 'lat', e.target.value)}
                         placeholder="-26.2041"
-                        className="w-full rounded border border-slate-300 px-1.5 py-0.5 font-mono text-xs focus:border-slate-500 focus:outline-none"
+                        className="w-full rounded border border-slate-300 px-1.5 py-1 font-mono text-xs transition-colors focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
                       />
                     </td>
                     <td className="px-3 py-1.5">
@@ -200,23 +201,25 @@ export default function SettingsClient() {
                         value={store.lon}
                         onChange={(e) => update(store.store_code, 'lon', e.target.value)}
                         placeholder="28.0473"
-                        className="w-full rounded border border-slate-300 px-1.5 py-0.5 font-mono text-xs focus:border-slate-500 focus:outline-none"
+                        className="w-full rounded border border-slate-300 px-1.5 py-1 font-mono text-xs transition-colors focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
                       />
                     </td>
                     <td className="px-3 py-1.5 text-right">
                       {store.error && (
-                        <span className="mr-2 text-red-500 text-xs">{store.error}</span>
+                        <span className="mr-2 text-xs text-red-500">{store.error}</span>
                       )}
                       {store.saved && !store.error ? (
-                        <span className="text-emerald-600 font-medium">✓ Saved</span>
+                        <span className="flex items-center justify-end gap-1 font-medium text-emerald-600">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+                        </span>
                       ) : (
-                        <button
+                        <Button
+                          variant="secondary"
                           onClick={() => save(store.store_code)}
                           disabled={store.saving || (!store.lat && !store.lon)}
-                          className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                         >
                           {store.saving ? 'Saving…' : 'Save'}
-                        </button>
+                        </Button>
                       )}
                     </td>
                   </tr>

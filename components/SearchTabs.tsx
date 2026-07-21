@@ -4,6 +4,7 @@ import { useState } from 'react'
 import SearchClient from '@/components/SearchClient'
 import DistancesClient from '@/components/DistancesClient'
 import SettingsClient from '@/components/SettingsClient'
+import { cn } from '@/components/ui/cn'
 
 type Tab = 'search' | 'distances' | 'settings'
 
@@ -18,22 +19,23 @@ export default function SearchTabs() {
 
   return (
     <>
-      <div className="flex gap-1 px-4 pt-3 pb-0">
+      <div className="flex gap-6 border-b border-slate-200 bg-white px-5">
         {(['search', 'distances', 'settings'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-t px-3 py-1.5 text-xs font-medium border border-b-0 ${
+            className={cn(
+              '-mb-px border-b-2 pb-3 pt-4 text-sm font-medium transition-colors',
               tab === t
-                ? 'bg-white border-slate-200 text-slate-900'
-                : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700'
-            }`}
+                ? 'border-accent-600 text-slate-900'
+                : 'border-transparent text-slate-400 hover:border-slate-300 hover:text-slate-600'
+            )}
           >
             {TAB_LABELS[t]}
           </button>
         ))}
       </div>
-      <div className="border-t border-slate-200">
+      <div className="bg-slate-50">
         {tab === 'search' && <SearchClient />}
         {tab === 'distances' && <DistancesClient />}
         {tab === 'settings' && <SettingsClient />}

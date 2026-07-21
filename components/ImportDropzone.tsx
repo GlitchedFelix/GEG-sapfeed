@@ -1,7 +1,13 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { UploadCloud } from 'lucide-react'
 import type { ImportResult } from '@/lib/types'
+import Panel from '@/components/ui/Panel'
+import Badge from '@/components/ui/Badge'
+import Alert from '@/components/ui/Alert'
+import { buttonBase, buttonSizes, buttonVariants } from '@/components/ui/Button'
+import { cn } from '@/components/ui/cn'
 
 export default function ImportDropzone() {
   const [isDragging, setIsDragging] = useState(false)
@@ -56,17 +62,19 @@ export default function ImportDropzone() {
         }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
-        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-16 text-center transition-colors ${
-          isDragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300 bg-white'
-        }`}
+        className={cn(
+          'flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-16 text-center transition-colors',
+          isDragging ? 'border-accent-500 bg-accent-50' : 'border-slate-300 bg-white hover:border-slate-400'
+        )}
       >
-        <p className="mb-2 text-sm font-medium text-slate-700">
+        <UploadCloud className="h-8 w-8 text-slate-400" />
+        <p className="text-sm font-medium text-slate-700">
           Drag SAP report files here
         </p>
-        <p className="mb-4 text-xs text-slate-400">
+        <p className="-mt-2 text-xs text-slate-400">
           .XLS exports from CTM or Italtile — brand is detected automatically from the filename
         </p>
-        <label className="cursor-pointer rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+        <label className={cn(buttonBase, buttonSizes.md, buttonVariants.primary, 'cursor-pointer')}>
           {uploading ? 'Uploading…' : 'Choose files'}
           <input
             type="file"
@@ -84,28 +92,20 @@ export default function ImportDropzone() {
         </label>
       </div>
 
-      {errorMessage && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert">
-          {errorMessage}
-        </div>
-      )}
+      {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
 
       {results.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-slate-700">Import results</h2>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            Import results
+            <Badge tone="neutral">{results.length}</Badge>
+          </h2>
           {results.map((r, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-3 text-sm"
-            >
+            <Panel key={i} className="flex items-center justify-between text-sm">
               <div>
-                <span
-                  className={`mr-2 rounded px-1.5 py-0.5 text-xs font-medium ${
-                    r.brand === 'CTM' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
-                  }`}
-                >
+                <Badge tone={r.brand === 'CTM' ? 'ctm' : 'ital'} className="mr-2">
                   {r.brand}
-                </span>
+                </Badge>
                 <span className="text-slate-600">{r.filename}</span>
               </div>
               <div className="text-slate-500">
@@ -117,7 +117,7 @@ export default function ImportDropzone() {
                   </span>
                 )}
               </div>
-            </div>
+            </Panel>
           ))}
         </div>
       )}

@@ -1,10 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
+import { Dialog, Transition } from '@headlessui/react'
+import { X, ChevronUp, ChevronDown } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { COLUMNS } from '@/lib/columns'
 import { parseStoreName } from '@/lib/store-utils'
 import type { Brand, DeliveryRecord } from '@/lib/types'
+import Panel from '@/components/ui/Panel'
+import Button from '@/components/ui/Button'
+import Alert from '@/components/ui/Alert'
+import StatCard from '@/components/ui/StatCard'
+import SegmentedControl from '@/components/ui/SegmentedControl'
+import Pagination from '@/components/ui/Pagination'
+import { fieldClass, fieldLabelClass } from '@/components/ui/fieldStyles'
+import { cn } from '@/components/ui/cn'
 
 type SortDir = 'asc' | 'desc'
 
@@ -243,121 +253,139 @@ export default function SearchClient() {
   }
 
   return (
-    <main className="px-4 py-3">
+    <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-4">
       {/* Column picker modal */}
-      {showColModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setShowColModal(false)} />
-          <div className="relative z-10 w-[480px] max-h-[80vh] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <span className="text-sm font-semibold text-slate-900">Visible columns</span>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setVisibleKeys(new Set(COLUMNS.map((c) => c.key)))}
-                  className="text-xs text-slate-500 hover:text-slate-900"
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setVisibleKeys(new Set())}
-                  className="text-xs text-slate-500 hover:text-slate-900"
-                >
-                  None
-                </button>
-                <button onClick={() => setShowColModal(false)} className="text-slate-400 hover:text-slate-700">
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 px-4 py-3">
-              {COLUMNS.map((col) => (
-                <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={visibleKeys.has(col.key)}
-                    onChange={() => toggleCol(col.key)}
-                    className="h-3.5 w-3.5 rounded border-slate-300"
-                  />
-                  <span className="text-xs text-slate-700">{col.label}</span>
-                </label>
-              ))}
-            </div>
+      <Transition show={showColModal} as={Fragment}>
+        <Dialog onClose={() => setShowColModal(false)} className="relative z-20">
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" aria-hidden="true" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 flex items-center justify-center p-4">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-150"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-100"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-md max-h-[80vh] overflow-y-auto rounded-xl bg-white shadow-popover">
+                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                  <Dialog.Title className="text-sm font-semibold text-slate-900">Visible columns</Dialog.Title>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setVisibleKeys(new Set(COLUMNS.map((c) => c.key)))}
+                      className="text-xs text-slate-500 hover:text-slate-900"
+                    >
+                      All
+                    </button>
+                    <button
+                      onClick={() => setVisibleKeys(new Set())}
+                      className="text-xs text-slate-500 hover:text-slate-900"
+                    >
+                      None
+                    </button>
+                    <button onClick={() => setShowColModal(false)} className="text-slate-400 hover:text-slate-700">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 px-4 py-3">
+                  {COLUMNS.map((col) => (
+                    <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={visibleKeys.has(col.key)}
+                        onChange={() => toggleCol(col.key)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-accent-600 focus:ring-accent-500"
+                      />
+                      <span className="text-xs text-slate-700">{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
           </div>
-        </div>
-      )}
+        </Dialog>
+      </Transition>
 
       {/* Top bar: brand toggle + filters + stats */}
-      <div className="mb-2 flex flex-wrap items-end gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
-        {/* Brand toggle */}
-        <div className="flex gap-1 mr-2">
-          {(['ALL', 'CTM', 'ITALTILE'] as const).map((b) => (
-            <button
-              key={b}
-              onClick={() => setBrand(b)}
-              className={`rounded px-2 py-1 text-xs font-medium ${
-                brand === b ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {b === 'ALL' ? 'All' : b}
-            </button>
-          ))}
-        </div>
+      <Panel className="flex flex-wrap items-end gap-3">
+        <SegmentedControl
+          options={[
+            { value: 'ALL' as const, label: 'All' },
+            { value: 'CTM' as const, label: 'CTM' },
+            { value: 'ITALTILE' as const, label: 'Italtile' },
+          ]}
+          value={brand}
+          onChange={setBrand}
+        />
 
-        <div className="h-4 w-px bg-slate-200" />
+        <div className="h-6 w-px bg-slate-200" />
 
         {/* Date + store filters */}
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           {/* Created On range */}
           <div className="flex items-end gap-1">
             <div>
-              <label className="mb-0.5 block text-xs text-slate-400">Created On From</label>
+              <label className={fieldLabelClass}>Created On From</label>
               <input
                 type="date"
                 value={createdFrom}
                 onChange={(e) => setCreatedFrom(e.target.value)}
-                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+                className={fieldClass}
               />
             </div>
             <div>
-              <label className="mb-0.5 block text-xs text-slate-400">To</label>
+              <label className={fieldLabelClass}>To</label>
               <input
                 type="date"
                 value={createdTo}
                 onChange={(e) => setCreatedTo(e.target.value)}
-                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+                className={fieldClass}
               />
             </div>
           </div>
 
-          <div className="h-4 w-px bg-slate-200" />
+          <div className="h-6 w-px bg-slate-200" />
 
           {/* Delivery Date range */}
           <div className="flex items-end gap-1">
             <div>
-              <label className="mb-0.5 block text-xs text-slate-400">Delivery Date From</label>
+              <label className={fieldLabelClass}>Delivery Date From</label>
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+                className={fieldClass}
               />
             </div>
             <div>
-              <label className="mb-0.5 block text-xs text-slate-400">To</label>
+              <label className={fieldLabelClass}>To</label>
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+                className={fieldClass}
               />
             </div>
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-slate-400">Store</label>
+            <label className={fieldLabelClass}>Store</label>
             <select
               value={storeFilter}
               onChange={(e) => setStoreFilter(e.target.value)}
-              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              className={fieldClass}
             >
               <option value="">All stores</option>
               {storeOptions.map((opt) => (
@@ -368,13 +396,13 @@ export default function SearchClient() {
             </select>
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-slate-400">Search</label>
+            <label className={fieldLabelClass}>Search</label>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Delivery / billing / sales no, customer…"
-              className="w-56 rounded border border-slate-300 px-1.5 py-1 text-xs"
+              className={cn('w-56', fieldClass)}
             />
           </div>
           {(createdFrom || createdTo || dateFrom || dateTo || storeFilter || search) && (
@@ -387,80 +415,69 @@ export default function SearchClient() {
                 setStoreFilter('')
                 setSearch('')
               }}
-              className="text-xs text-slate-400 underline-offset-2 hover:underline"
+              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
             >
               Clear
             </button>
           )}
         </div>
 
-        <div className="h-4 w-px bg-slate-200" />
+        <div className="h-6 w-px bg-slate-200" />
 
         {/* Inline stats */}
         {stats ? (
-          <dl className="flex gap-4 text-xs">
-            <div>
-              <dt className="text-slate-400">Deliveries</dt>
-              <dd className="font-semibold text-slate-900">{stats.deliveryCount}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Transport 1</dt>
-              <dd className="text-sm font-bold text-slate-900">{formatZar(stats.totalTransport1)}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Transport 2</dt>
-              <dd className="font-medium text-slate-700">{formatZar(stats.totalTransport2)}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Gross</dt>
-              <dd className="font-medium text-slate-700">{formatKg(stats.totalGrossWeight)}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Net</dt>
-              <dd className="font-medium text-slate-700">{formatKg(stats.totalNetWeight)}</dd>
-            </div>
-          </dl>
+          <div className="flex flex-wrap gap-5">
+            <StatCard label="Deliveries" value={String(stats.deliveryCount)} />
+            <StatCard label="Transport 1" value={formatZar(stats.totalTransport1)} emphasis="primary" />
+            <StatCard label="Transport 2" value={formatZar(stats.totalTransport2)} />
+            <StatCard label="Gross" value={formatKg(stats.totalGrossWeight)} />
+            <StatCard label="Net" value={formatKg(stats.totalNetWeight)} />
+          </div>
         ) : (
           <span className="text-xs text-slate-400">Loading…</span>
         )}
 
         <div className="ml-auto flex gap-2">
-          <button
-            onClick={exportCsv}
-            disabled={exporting || totalCount === 0}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-          >
+          <Button variant="secondary" onClick={exportCsv} disabled={exporting || totalCount === 0}>
             {exporting ? 'Exporting…' : 'Export CSV'}
-          </button>
-          <button
-            onClick={() => setShowColModal(true)}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-          >
+          </Button>
+          <Button variant="secondary" onClick={() => setShowColModal(true)}>
             Columns ({visibleKeys.size}/{COLUMNS.length})
-          </button>
+          </Button>
         </div>
-      </div>
+      </Panel>
 
-      {error && (
-        <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {error}
-        </div>
-      )}
+      {error && <Alert tone="warning">{error}</Alert>}
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-        <table className="w-full text-xs">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-card scrollbar-thin">
+        <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
+            <tr className="border-b border-slate-200 bg-slate-50/80">
               {visibleCols.map((col) => (
-                <th key={col.key} className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-slate-600">
+                <th
+                  key={col.key}
+                  className={cn(
+                    'whitespace-nowrap px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500',
+                    col.type === 'number' ? 'text-right' : 'text-left'
+                  )}
+                >
                   <button
                     onClick={() => col.sortable && toggleSort(col.key)}
-                    className={`flex items-center gap-0.5 ${col.sortable ? 'cursor-pointer hover:text-slate-900' : 'cursor-default'}`}
+                    className={cn(
+                      'inline-flex items-center gap-0.5',
+                      col.sortable ? 'cursor-pointer hover:text-slate-900' : 'cursor-default',
+                      col.type === 'number' && 'flex-row-reverse'
+                    )}
                     disabled={!col.sortable}
                   >
                     {col.label}
-                    {sortKey === col.key && <span>{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    {sortKey === col.key &&
+                      (sortDir === 'asc' ? (
+                        <ChevronUp className="h-3 w-3 text-accent-600" />
+                      ) : (
+                        <ChevronDown className="h-3 w-3 text-accent-600" />
+                      ))}
                   </button>
                 </th>
               ))}
@@ -469,25 +486,26 @@ export default function SearchClient() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={visibleCols.length} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={visibleCols.length} className="px-3 py-10 text-center text-slate-400">
                   Loading…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={visibleCols.length} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={visibleCols.length} className="px-3 py-10 text-center text-slate-400">
                   No deliveries match these filters.
                 </td>
               </tr>
             ) : (
               rows.map((row, i) => (
-                <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                <tr key={i} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
                   {visibleCols.map((col) => {
                     const value = (row as any)[col.key]
+                    const numeric = col.type === 'number'
                     if (col.key === 'store_code') {
                       const { code } = parseStoreName(row.store_name ?? '')
                       return (
-                        <td key={col.key} className="whitespace-nowrap px-2 py-1 font-mono font-medium text-slate-800">
+                        <td key={col.key} className="whitespace-nowrap px-3 py-1.5 font-mono font-medium text-slate-800">
                           {code || row.store_code}
                         </td>
                       )
@@ -495,7 +513,7 @@ export default function SearchClient() {
                     if (col.key === 'store_name') {
                       const { name } = parseStoreName(row.store_name ?? '')
                       return (
-                        <td key={col.key} className="whitespace-nowrap px-2 py-1 text-slate-700">
+                        <td key={col.key} className="whitespace-nowrap px-3 py-1.5 text-slate-700">
                           {name || row.store_name}
                         </td>
                       )
@@ -505,7 +523,13 @@ export default function SearchClient() {
                     else if (value === null || value === undefined) display = '—'
                     else display = String(value)
                     return (
-                      <td key={col.key} className="whitespace-nowrap px-2 py-1 text-slate-700">
+                      <td
+                        key={col.key}
+                        className={cn(
+                          'whitespace-nowrap px-3 py-1.5 text-slate-700',
+                          numeric && 'text-right tabular-nums font-medium text-slate-800'
+                        )}
+                      >
                         {display}
                       </td>
                     )
@@ -517,27 +541,14 @@ export default function SearchClient() {
         </table>
       </div>
 
-      {/* Pagination */}
-      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-        <span>{totalCount} result{totalCount === 1 ? '' : 's'}</span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="rounded border border-slate-300 px-2 py-0.5 disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span>Page {page + 1} of {totalPages}</span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="rounded border border-slate-300 px-2 py-0.5 disabled:opacity-40"
-          >
-            Next
-          </button>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        onPrev={() => setPage((p) => Math.max(0, p - 1))}
+        onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+        itemLabel="result"
+      />
     </main>
   )
 }

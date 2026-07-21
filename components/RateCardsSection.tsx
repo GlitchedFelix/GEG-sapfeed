@@ -1,9 +1,15 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { UploadCloud, X, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseRateCardGrid, parseItaltileStoreGrid, parseItaltileWebstoreList } from '@/lib/rate-card-file'
 import type { RateCard, RateCardDistanceBand, RateCardWeightBand, RateCardCell, RateSystem } from '@/lib/types'
+import Panel from '@/components/ui/Panel'
+import Button from '@/components/ui/Button'
+import SegmentedControl from '@/components/ui/SegmentedControl'
+import { fieldClass, fieldLabelClass } from '@/components/ui/fieldStyles'
+import { cn } from '@/components/ui/cn'
 
 function numOrNull(s: string): number | null {
   if (s.trim() === '') return null
@@ -277,22 +283,10 @@ export default function RateCardsSection() {
   }
 
   return (
-    <>
-      <div className="mb-3 flex gap-1">
-        {SYSTEMS.map((s) => (
-          <button
-            key={s.value}
-            onClick={() => setSystem(s.value)}
-            className={`rounded px-2 py-1 text-xs font-medium ${
-              system === s.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-4">
+      <SegmentedControl options={SYSTEMS} value={system} onChange={setSystem} />
 
-      <div className="mb-3 flex flex-wrap items-center gap-1">
+      <Panel className="flex flex-wrap gap-2">
         {loadingCards ? (
           <span className="text-xs text-slate-400">Loading rate cards…</span>
         ) : (
@@ -300,57 +294,59 @@ export default function RateCardsSection() {
             <div key={c.id} className="flex items-center">
               <button
                 onClick={() => selectCard(c.id)}
-                className={`rounded-l px-2 py-1 text-xs font-medium ${
-                  selectedId === c.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                className={cn(
+                  'rounded-l-full py-1 pl-3 pr-1.5 text-xs font-medium transition-colors',
+                  selectedId === c.id
+                    ? 'bg-accent-600 text-white shadow-sm'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                )}
               >
                 {c.effective_date}{c.label ? ` — ${c.label}` : ''}
               </button>
               <button
                 onClick={() => deleteCard(c.id)}
                 title="Delete rate card"
-                className={`rounded-r px-1.5 py-1 text-xs ${
-                  selectedId === c.id ? 'bg-slate-900 text-slate-300 hover:text-red-400' : 'bg-slate-100 text-slate-400 hover:text-red-500'
-                }`}
+                className={cn(
+                  'rounded-r-full py-1 pl-1 pr-2.5 text-xs',
+                  selectedId === c.id
+                    ? 'bg-accent-600 text-white/70 hover:text-white'
+                    : 'border border-l-0 border-slate-200 bg-white text-slate-400 hover:text-red-500'
+                )}
               >
-                ×
+                <X className="h-3 w-3" />
               </button>
             </div>
           ))
         )}
-      </div>
+      </Panel>
 
-      <div className="mb-4 flex items-end gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+      <Panel className="flex flex-wrap items-end gap-2">
         <div>
-          <label className="mb-0.5 block text-xs text-slate-400">Effective date</label>
+          <label className={fieldLabelClass}>Effective date</label>
           <input
             type="date"
             value={newDate}
             onChange={(e) => setNewDate(e.target.value)}
-            className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+            className={fieldClass}
           />
         </div>
         <div>
-          <label className="mb-0.5 block text-xs text-slate-400">Label (optional)</label>
+          <label className={fieldLabelClass}>Label (optional)</label>
           <input
             type="text"
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             placeholder="e.g. 2026 rates"
-            className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+            className={fieldClass}
           />
         </div>
-        <button
-          onClick={createCard}
-          disabled={!newDate || creating}
-          className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-        >
-          {creating ? 'Creating…' : '+ New rate card'}
-        </button>
-      </div>
+        <Button variant="secondary" onClick={createCard} disabled={!newDate || creating}>
+          + New rate card
+        </Button>
+      </Panel>
 
-      <div className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
-        <p className="mb-2 text-xs text-slate-500">
+      <Panel>
+        <p className="mb-3 text-xs text-slate-500">
           {system === 'CTM' &&
             'Or upload a spreadsheet in the same layout as the reference rate card (distance bands across the top, weight bands down the side) — it updates the rate card for the date below if one already exists, or creates a new one.'}
           {system === 'ITALTILE_STORE' &&
@@ -358,24 +354,24 @@ export default function RateCardsSection() {
           {system === 'ITALTILE_WEBSTORE' &&
             'Or upload a spreadsheet in the Italtile webstore rate card layout (distance_from/distance_to/weight_from/weight_to/rate/additional_cost columns) — it updates the rate card for the date below if one already exists, or creates a new one.'}
         </p>
-        <div className="mb-2 flex items-end gap-2">
+        <div className="mb-3 flex flex-wrap items-end gap-2">
           <div>
-            <label className="mb-0.5 block text-xs text-slate-400">Effective date</label>
+            <label className={fieldLabelClass}>Effective date</label>
             <input
               type="date"
               value={uploadDate}
               onChange={(e) => setUploadDate(e.target.value)}
-              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              className={fieldClass}
             />
           </div>
           <div>
-            <label className="mb-0.5 block text-xs text-slate-400">Label (optional)</label>
+            <label className={fieldLabelClass}>Label (optional)</label>
             <input
               type="text"
               value={uploadLabel}
               onChange={(e) => setUploadLabel(e.target.value)}
               placeholder="e.g. 2026 rates"
-              className="rounded border border-slate-300 px-1.5 py-1 text-xs"
+              className={fieldClass}
             />
           </div>
         </div>
@@ -389,10 +385,12 @@ export default function RateCardsSection() {
             if (file) handleUpload(file)
           }}
           onClick={() => fileInputRef.current?.click()}
-          className={`flex cursor-pointer items-center justify-center rounded-md border-2 border-dashed px-3 py-4 text-xs ${
-            dragActive ? 'border-slate-500 bg-slate-50 text-slate-600' : 'border-slate-300 text-slate-400 hover:bg-slate-50'
-          }`}
+          className={cn(
+            'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-6 text-center text-xs transition-colors',
+            dragActive ? 'border-accent-500 bg-accent-50 text-accent-700' : 'border-slate-300 text-slate-400 hover:border-slate-400 hover:bg-slate-50'
+          )}
         >
+          <UploadCloud className="h-5 w-5" />
           {uploading ? 'Uploading…' : 'Drop a .xlsx/.csv rate card here, or click to browse'}
           <input
             ref={fileInputRef}
@@ -406,14 +404,18 @@ export default function RateCardsSection() {
             }}
           />
         </div>
-        {uploadSuccess && <p className="mt-2 text-xs font-medium text-emerald-600">✓ {uploadSuccess}</p>}
+        {uploadSuccess && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {uploadSuccess}
+          </p>
+        )}
         {uploadError && <p className="mt-2 text-xs text-red-500">{uploadError}</p>}
-      </div>
+      </Panel>
 
       {loadingBands ? (
         <p className="text-xs text-slate-400">Loading grid…</p>
       ) : (
-        <div className="rounded-md border border-slate-200 bg-white p-3">
+        <Panel>
           {system === 'CTM' && (
             <div className="mb-3 flex items-center gap-2">
               <label className="text-xs text-slate-500">Long-distance rate (R/km, beyond last band)</label>
@@ -422,20 +424,20 @@ export default function RateCardsSection() {
                 value={longDistanceRate}
                 onChange={(e) => { setLongDistanceRate(e.target.value); setSaved(false) }}
                 disabled={selectedId == null}
-                className="w-20 rounded border border-slate-300 px-1.5 py-0.5 font-mono text-xs disabled:bg-slate-50"
+                className={cn('w-20 text-right font-mono', fieldClass, 'disabled:bg-slate-50')}
               />
             </div>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="text-xs border-separate border-spacing-0">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 scrollbar-thin">
+            <table className="border-collapse text-xs">
               <thead>
                 <tr>
-                  <th className="sticky left-0 bg-white px-2 py-1 text-left font-medium text-slate-600 w-40">
+                  <th className="sticky left-0 z-[1] w-40 bg-slate-50/80 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     Weight \ Distance
                   </th>
                   {distanceBands.map((b) => (
-                    <th key={b.id} className="px-1 py-1 text-center font-medium text-slate-600 min-w-[80px]">
+                    <th key={b.id} className="min-w-[80px] bg-slate-50/80 px-1 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       {distanceBandLabel(b)}
                     </th>
                   ))}
@@ -443,8 +445,8 @@ export default function RateCardsSection() {
               </thead>
               <tbody>
                 {weightBands.map((wb, wi) => (
-                  <tr key={wb.id} className="border-t border-slate-100">
-                    <td className="sticky left-0 bg-white px-2 py-1 font-medium text-slate-700">
+                  <tr key={wb.id} className={cn('border-t border-slate-100', wi % 2 === 1 && 'bg-slate-50/40')}>
+                    <td className="sticky left-0 z-[1] border-r border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700">
                       {wb.label}
                       {wb.mode === 'per_ton' && (
                         <span className="ml-1 text-[10px] font-normal text-slate-400">R/ton</span>
@@ -453,7 +455,7 @@ export default function RateCardsSection() {
                         <span className="ml-1 text-[10px] font-normal text-slate-400">R/kg over 1 ton</span>
                       )}
                       {wb.is_ibt && (
-                        <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-normal text-amber-700">IBT</span>
+                        <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-normal text-amber-700">IBT</span>
                       )}
                     </td>
                     {distanceBands.map((db, di) => (
@@ -464,7 +466,7 @@ export default function RateCardsSection() {
                           onChange={(e) => updateCell(wi, di, e.target.value)}
                           placeholder="R"
                           disabled={selectedId == null || loadingCells}
-                          className="w-16 rounded border border-slate-300 px-1 py-0.5 text-center font-mono disabled:bg-slate-50"
+                          className="w-16 rounded border border-slate-200 bg-white px-1 py-1 text-right font-mono text-xs transition-colors focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/30 disabled:bg-slate-50"
                         />
                       </td>
                     ))}
@@ -475,19 +477,19 @@ export default function RateCardsSection() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              onClick={saveAmounts}
-              disabled={saving || selectedId == null}
-              className="rounded bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-40"
-            >
+            <Button variant="primary" onClick={saveAmounts} disabled={saving || selectedId == null}>
               {saving ? 'Saving…' : 'Save rate card'}
-            </button>
-            {saved && !saving && <span className="text-xs font-medium text-emerald-600">✓ Saved</span>}
+            </Button>
+            {saved && !saving && (
+              <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+              </span>
+            )}
             {saveError && <span className="text-xs text-red-500">{saveError}</span>}
             {selectedId == null && <span className="text-xs text-slate-400">Select or create a rate card to enter amounts.</span>}
           </div>
-        </div>
+        </Panel>
       )}
-    </>
+    </div>
   )
 }
