@@ -10,6 +10,7 @@ import Panel from '@/components/ui/Panel'
 import Button from '@/components/ui/Button'
 import Alert from '@/components/ui/Alert'
 import SegmentedControl from '@/components/ui/SegmentedControl'
+import MultiSelect from '@/components/ui/MultiSelect'
 import Pagination from '@/components/ui/Pagination'
 import { fieldClass, fieldLabelClass } from '@/components/ui/fieldStyles'
 import { cn } from '@/components/ui/cn'
@@ -72,7 +73,7 @@ export default function DistancesClient() {
   const [brand, setBrand] = useState<Brand | 'ALL'>('ALL')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [storeFilter, setStoreFilter] = useState('')
+  const [storeFilters, setStoreFilters] = useState<string[]>([])
   const [storeOptions, setStoreOptions] = useState<{ value: string; label: string }[]>([])
   const [sortKey, setSortKey] = useState('distance_km')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -97,10 +98,10 @@ export default function DistancesClient() {
       if (brand !== 'ALL') q = q.eq('brand', brand)
       if (dateFrom) q = q.gte('delivery_date', dateFrom)
       if (dateTo) q = q.lte('delivery_date', dateTo)
-      if (storeFilter) q = q.eq('store_code', storeFilter)
+      if (storeFilters.length > 0) q = q.in('store_code', storeFilters)
       return q
     },
-    [brand, dateFrom, dateTo, storeFilter]
+    [brand, dateFrom, dateTo, storeFilters]
   )
 
   const fetchData = useCallback(async () => {
@@ -195,14 +196,14 @@ export default function DistancesClient() {
         .map(([value, label]) => ({ value, label }))
         .sort((a, b) => a.label.localeCompare(b.label))
       setStoreOptions(opts)
-      setStoreFilter('')
+      setStoreFilters([])
     }
     loadStores()
   }, [brand, supabase])
 
   useEffect(() => {
     setPage(0)
-  }, [brand, dateFrom, dateTo, storeFilter, sortKey, sortDir])
+  }, [brand, dateFrom, dateTo, storeFilters, sortKey, sortDir])
 
   async function runBackfill() {
     setBackfilling(true)
@@ -378,22 +379,16 @@ export default function DistancesClient() {
               className={fieldClass}
             />
           </div>
-          <div>
-            <label className={fieldLabelClass}>Store</label>
-            <select
-              value={storeFilter}
-              onChange={(e) => setStoreFilter(e.target.value)}
-              className={fieldClass}
-            >
-              <option value="">All stores</option>
-              {storeOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-          {(dateFrom || dateTo || storeFilter) && (
+          <MultiSelect
+            label="Store"
+            options={storeOptions}
+            selected={storeFilters}
+            onChange={setStoreFilters}
+            placeholder="All stores"
+          />
+          {(dateFrom || dateTo || storeFilters.length > 0) && (
             <button
-              onClick={() => { setDateFrom(''); setDateTo(''); setStoreFilter('') }}
+              onClick={() => { setDateFrom(''); setDateTo(''); setStoreFilters([]) }}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
             >
               Clear

@@ -12,6 +12,7 @@ import Button from '@/components/ui/Button'
 import Alert from '@/components/ui/Alert'
 import StatCard from '@/components/ui/StatCard'
 import SegmentedControl from '@/components/ui/SegmentedControl'
+import MultiSelect from '@/components/ui/MultiSelect'
 import Pagination from '@/components/ui/Pagination'
 import { fieldClass, fieldLabelClass } from '@/components/ui/fieldStyles'
 import { cn } from '@/components/ui/cn'
@@ -36,7 +37,7 @@ export default function SearchClient() {
   const [dateTo, setDateTo] = useState('')
   const [createdFrom, setCreatedFrom] = useState('')
   const [createdTo, setCreatedTo] = useState('')
-  const [storeFilter, setStoreFilter] = useState('')
+  const [storeFilters, setStoreFilters] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sortKey, setSortKey] = useState('delivery_date')
@@ -72,11 +73,11 @@ export default function SearchClient() {
       if (createdTo) q = q.lte('created_on', createdTo)
       if (dateFrom) q = q.gte('delivery_date', dateFrom)
       if (dateTo) q = q.lte('delivery_date', dateTo)
-      if (storeFilter) q = q.eq('store_code', storeFilter)
+      if (storeFilters.length > 0) q = q.in('store_code', storeFilters)
       if (debouncedSearch) q = q.ilike('search_blob', `%${debouncedSearch.toLowerCase()}%`)
       return q
     },
-    [brand, createdFrom, createdTo, dateFrom, dateTo, storeFilter, debouncedSearch]
+    [brand, createdFrom, createdTo, dateFrom, dateTo, storeFilters, debouncedSearch]
   )
 
   const fetchData = useCallback(async () => {
@@ -157,14 +158,14 @@ export default function SearchClient() {
         .map(([value, label]) => ({ value, label }))
         .sort((a, b) => a.label.localeCompare(b.label))
       setStoreOptions(opts)
-      setStoreFilter('')
+      setStoreFilters([])
     }
     loadStores()
   }, [brand, supabase])
 
   useEffect(() => {
     setPage(0)
-  }, [brand, dateFrom, dateTo, storeFilter, debouncedSearch, sortKey, sortDir])
+  }, [brand, dateFrom, dateTo, storeFilters, debouncedSearch, sortKey, sortDir])
 
   function toggleSort(key: string) {
     if (sortKey === key) {
@@ -380,21 +381,13 @@ export default function SearchClient() {
               />
             </div>
           </div>
-          <div>
-            <label className={fieldLabelClass}>Store</label>
-            <select
-              value={storeFilter}
-              onChange={(e) => setStoreFilter(e.target.value)}
-              className={fieldClass}
-            >
-              <option value="">All stores</option>
-              {storeOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MultiSelect
+            label="Store"
+            options={storeOptions}
+            selected={storeFilters}
+            onChange={setStoreFilters}
+            placeholder="All stores"
+          />
           <div>
             <label className={fieldLabelClass}>Search</label>
             <input
@@ -405,14 +398,14 @@ export default function SearchClient() {
               className={cn('w-56', fieldClass)}
             />
           </div>
-          {(createdFrom || createdTo || dateFrom || dateTo || storeFilter || search) && (
+          {(createdFrom || createdTo || dateFrom || dateTo || storeFilters.length > 0 || search) && (
             <button
               onClick={() => {
                 setCreatedFrom('')
                 setCreatedTo('')
                 setDateFrom('')
                 setDateTo('')
-                setStoreFilter('')
+                setStoreFilters([])
                 setSearch('')
               }}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
