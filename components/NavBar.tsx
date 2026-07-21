@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LogOut } from 'lucide-react'
+import { LogOut, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 
 export default function NavBar() {
@@ -41,13 +41,26 @@ export default function NavBar() {
           </Link>
         </div>
       </div>
-      <button
-        onClick={handleSignOut}
-        className="flex items-center gap-1.5 border-l border-slate-200 pl-4 text-xs font-medium text-slate-400 hover:text-slate-700"
-      >
-        <LogOut className="h-3.5 w-3.5" />
-        Sign out
-      </button>
+      <div className="flex items-center gap-3">
+        <Link
+          href="/settings"
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+            pathname.startsWith('/settings')
+              ? 'bg-accent-50 text-accent-700 ring-1 ring-inset ring-accent-100'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <Settings className="h-3.5 w-3.5" />
+          Settings
+        </Link>
+        <button
+          onClick={handleSignOut}
+          className="flex items-center gap-1.5 border-l border-slate-200 pl-3 text-xs font-medium text-slate-400 hover:text-slate-700"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
+      </div>
     </nav>
   )
 }

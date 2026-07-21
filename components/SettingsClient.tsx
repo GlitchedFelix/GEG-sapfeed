@@ -135,8 +135,15 @@ export default function SettingsClient() {
   const configured = visible.filter((s) => s.saved).length
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-5">
-      <h2 className="mb-3 text-sm font-semibold text-slate-800">Settings</h2>
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <h1 className="mb-1 text-xl font-semibold text-slate-900">Settings</h1>
+      <p className="mb-6 text-sm text-slate-500">Manage rate cards and store geocoding used across reports.</p>
+
+      <section className="mb-3">
+        <h2 className="text-sm font-semibold text-slate-800">Rate Cards</h2>
+        <p className="mb-3 text-xs text-slate-500">Payout grids by distance and weight, effective-dated per delivery.</p>
+        <RateCardsSection />
+      </section>
 
       <CollapsibleSection
         title="Geocoding — Store Coordinates"
@@ -228,13 +235,6 @@ export default function SettingsClient() {
             </table>
           </div>
         )}
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Rate Cards"
-        subtitle="Payout grids by distance and weight, effective-dated per delivery."
-      >
-        <RateCardsSection />
       </CollapsibleSection>
     </main>
   )
