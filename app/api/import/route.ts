@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { parseSapExport } from '@/lib/sap-parser'
-import { geocodeAddress, geocodeStructuredAddress } from '@/lib/geocoding'
+import { geocodeAddress, geocodeStructuredAddress, type GeocodeOutcome } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
 import type { ImportResult } from '@/lib/types'
 
@@ -87,6 +87,13 @@ export async function POST(request: NextRequest) {
     // within a single import batch.
     const storeCoordCache = new Map<string, { lat: number; lon: number } | null>()
 
+    // Cache customer geocodes by normalized address so repeat customers in
+    // the same import batch don't each cost a separate Nominatim round-trip.
+    const customerGeoCache = new Map<string, GeocodeOutcome>()
+    function customerAddressKey(record: { street: string | null; city: string | null; country: string | null }) {
+      return [record.street, record.city, record.country].map((s) => (s ?? '').trim().toLowerCase()).join('|')
+    }
+
     for (const record of newRecords) {
       // 1. Resolve store coordinates (from DB or geocode fresh)
       let storeLoc: { lat: number; lon: number } | null = null
@@ -126,13 +133,22 @@ export async function POST(request: NextRequest) {
       const addressParts = [record.street, record.city, record.country].filter(Boolean)
       if (addressParts.length === 0) continue
 
-      await sleep(1100)  // Nominatim ToS: max 1 req/sec
-      const customerGeo = await geocodeStructuredAddress({
-        street: record.street,
-        city: record.city,
-        country: record.country,
-      })
-      if (!customerGeo) continue
+      const addressKey = customerAddressKey(record)
+      let customerGeo = customerGeoCache.get(addressKey)
+      if (!customerGeo) {
+        await sleep(1100)  // Nominatim ToS: max 1 req/sec
+        customerGeo = await geocodeStructuredAddress({
+          street: record.street,
+          city: record.city,
+          country: record.country,
+        })
+        // Don't cache transient failures — worth retrying if the same
+        // address comes up again later in this batch.
+        if (!('error' in customerGeo && customerGeo.error === 'http_error')) {
+          customerGeoCache.set(addressKey, customerGeo)
+        }
+      }
+      if ('error' in customerGeo) continue
 
       // 3. Calculate driving distance
       let distanceKm: number | null = null

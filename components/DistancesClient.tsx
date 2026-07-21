@@ -213,7 +213,7 @@ export default function DistancesClient() {
     let hadBlockingError = false
     try {
       while (true) {
-        const res = await fetch('/api/backfill-distances?batch=10')
+        const res = await fetch('/api/backfill-distances?batch=50')
         if (!res.ok) { setError('Backfill request failed'); hadBlockingError = true; break }
         const json = await res.json()
         const processed: number = json.processed

@@ -4,6 +4,13 @@ export interface GeoResult {
   displayName: string
 }
 
+// Mirrors the DrivingDistanceResult pattern in lib/routing.ts: callers need to
+// tell a transient failure (network blip, Nominatim 5xx/429) apart from a real
+// "this address doesn't resolve" so only the latter gets treated as permanent.
+export type GeocodeOutcome =
+  | (GeoResult & { precise: boolean })
+  | { error: 'no_match' | 'http_error' }
+
 export async function geocodeAddress(query: string): Promise<GeoResult | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
   try {
@@ -62,15 +69,29 @@ function sanityCheck(address: { country?: string; country_code?: string; [key: s
   return true
 }
 
-async function nominatimSearch(params: URLSearchParams): Promise<{ lat: string; lon: string; display_name: string; address?: Record<string, unknown> } | null> {
+type NominatimResult = { lat: string; lon: string; display_name: string; address?: Record<string, unknown> }
+
+// Throws on a bad HTTP response (rate limit, 5xx, etc.) instead of returning
+// null, so callers can tell "the service failed" apart from "zero results" —
+// the former is transient and worth retrying, the latter isn't.
+async function nominatimSearch(params: URLSearchParams): Promise<NominatimResult | null> {
   const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`
   const res = await fetch(url, {
     headers: { 'User-Agent': 'GEG-sapfeed/1.0 (glitcheddesignsinfo@gmail.com)' },
   })
-  if (!res.ok) return null
+  if (!res.ok) throw new Error(`nominatim http ${res.status}`)
   const data = await res.json()
   if (!Array.isArray(data) || data.length === 0) return null
   return data[0]
+}
+
+// A match with no road/house_number in its address breakdown resolved no
+// more precisely than a locality centroid (suburb/city/town) — Nominatim's
+// free-text fallback in particular tends to produce these. A distance
+// computed from one of these can be off by kilometers, so it's worth telling
+// apart from a proper street-level match even though we still return it.
+function isPrecise(address: Record<string, unknown>): boolean {
+  return Boolean(address.road || address.house_number)
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -79,7 +100,7 @@ export async function geocodeStructuredAddress(parts: {
   street?: string | null
   city?: string | null
   country?: string | null
-}): Promise<GeoResult | null> {
+}): Promise<GeocodeOutcome> {
   try {
     const params = new URLSearchParams({ format: 'json', addressdetails: '1', limit: '1' })
     if (parts.street) params.set('street', parts.street)
@@ -91,30 +112,48 @@ export async function geocodeStructuredAddress(parts: {
       params.set('countrycodes', parts.country.trim().toLowerCase())
     }
 
-    let result = await nominatimSearch(params)
+    let result: NominatimResult | null
+    try {
+      result = await nominatimSearch(params)
+    } catch {
+      return { error: 'http_error' }
+    }
 
+    let fellBackToFreeText = false
     if (!result) {
       // Structured field-by-field search can fail to resolve messy `street`
       // values (shop/complex names, "Cnr X & Y", unit numbers) that the old
       // single free-text query could still blend into a match. Retry once
       // with the free-text form before giving up.
       const freeText = [parts.street, parts.city, parts.country].filter(Boolean).join(', ')
-      if (!freeText) return null
+      if (!freeText) return { error: 'no_match' }
       await sleep(1100)
+      fellBackToFreeText = true
       const fallbackParams = new URLSearchParams({ q: freeText, format: 'json', addressdetails: '1', limit: '1' })
-      result = await nominatimSearch(fallbackParams)
-      if (!result) return null
+      try {
+        result = await nominatimSearch(fallbackParams)
+      } catch {
+        return { error: 'http_error' }
+      }
+      if (!result) return { error: 'no_match' }
     }
 
     const address = result.address ?? {}
-    if (!sanityCheck(address, parts)) return null
+    if (!sanityCheck(address, parts)) return { error: 'no_match' }
+
+    const precise = isPrecise(address)
+    // The free-text fallback is the path most likely to have blended a
+    // messy `street` value into a plain locality guess — only trust it when
+    // the result actually resolved to a road, not just a matching city.
+    if (fellBackToFreeText && !precise) return { error: 'no_match' }
 
     return {
       lat: parseFloat(result.lat),
       lon: parseFloat(result.lon),
       displayName: result.display_name,
+      precise,
     }
   } catch {
-    return null
+    return { error: 'http_error' }
   }
 }
