@@ -3,13 +3,15 @@
 import { useState } from 'react'
 import SearchClient from '@/components/SearchClient'
 import DistancesClient from '@/components/DistancesClient'
+import PayoutClient from '@/components/PayoutClient'
 import { cn } from '@/components/ui/cn'
 
-type Tab = 'search' | 'distances'
+type Tab = 'search' | 'distances' | 'payout'
 
 const TAB_LABELS: Record<Tab, string> = {
   search: 'Search',
   distances: 'Distances',
+  payout: 'Payout',
 }
 
 export default function SearchTabs() {
@@ -18,7 +20,7 @@ export default function SearchTabs() {
   return (
     <>
       <div className="flex gap-6 border-b border-slate-200 bg-white px-5">
-        {(['search', 'distances'] as Tab[]).map((t) => (
+        {(['search', 'distances', 'payout'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -36,6 +38,7 @@ export default function SearchTabs() {
       <div className="bg-slate-50">
         {tab === 'search' && <SearchClient />}
         {tab === 'distances' && <DistancesClient />}
+        {tab === 'payout' && <PayoutClient />}
       </div>
     </>
   )
