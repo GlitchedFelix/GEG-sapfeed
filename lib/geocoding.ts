@@ -1,3 +1,5 @@
+import { cleanStreet } from './address-clean'
+
 export interface GeoResult {
   lat: number
   lon: number
@@ -102,8 +104,10 @@ export async function geocodeStructuredAddress(parts: {
   country?: string | null
 }): Promise<GeocodeOutcome> {
   try {
+    const cleaned = cleanStreet(parts.street)
+
     const params = new URLSearchParams({ format: 'json', addressdetails: '1', limit: '1' })
-    if (parts.street) params.set('street', parts.street)
+    if (cleaned.structured) params.set('street', cleaned.structured)
     if (parts.city) params.set('city', parts.city)
     if (parts.country) params.set('country', parts.country)
     // Narrow the search area server-side when the country looks like an
@@ -125,7 +129,7 @@ export async function geocodeStructuredAddress(parts: {
       // values (shop/complex names, "Cnr X & Y", unit numbers) that the old
       // single free-text query could still blend into a match. Retry once
       // with the free-text form before giving up.
-      const freeText = [parts.street, parts.city, parts.country].filter(Boolean).join(', ')
+      const freeText = [cleaned.freeText, parts.city, parts.country].filter(Boolean).join(', ')
       if (!freeText) return { error: 'no_match' }
       await sleep(1100)
       fellBackToFreeText = true
