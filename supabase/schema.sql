@@ -534,3 +534,24 @@ where geocode_failed = true and customer_lat is null;
 -- ---------------------------------------------------------------------
 alter table deliveries
   add column if not exists distance_manual boolean not null default false;
+
+-- ---------------------------------------------------------------------
+-- 12. One-time data fix: retry rows under the new street-cleaning logic.
+--    geocodeStructuredAddress now strips unit/shop numbers and untangles
+--    "Cnr X & Y" notation from `street` before querying Nominatim
+--    (lib/address-clean.ts), which should resolve some addresses that
+--    previously failed. Rows already marked geocode_failed are excluded
+--    from the backfill job's candidate query, so they need their flag
+--    cleared to be picked up and retried. Safe to run even if some of
+--    these are genuine failures — they'll just be marked failed again.
+-- ---------------------------------------------------------------------
+
+update deliveries
+set geocode_failed = false
+where geocode_failed = true and customer_lat is null;
+
+-- Then click "Backfill distances" in the Distances tab to re-geocode the
+-- reset rows individually through the new code path. Watch the
+-- geocode_failed/customer_lat-is-null counts before and after to confirm
+-- the change actually improved the match rate (same signal used to catch
+-- section 10's incident) before assuming it worked.
