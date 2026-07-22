@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
-import { parseStoreName } from '@/lib/store-utils'
+import { parseStoreName, isWebstoreName } from '@/lib/store-utils'
 import RateCardsSection from '@/components/RateCardsSection'
 import CollapsibleSection from '@/components/CollapsibleSection'
 import Button from '@/components/ui/Button'
@@ -34,7 +34,10 @@ export default function SettingsClient() {
     async function load() {
       setLoading(true)
 
-      // Paginate through all deliveries to collect every unique store.
+      // Paginate through all deliveries to collect every unique store, plus —
+      // for webstore rows — the distinct IBT From stores whose coordinates
+      // actually drive distance for those rows (see resolveOriginStore),
+      // keyed the same way it is there: the trimmed IBT From text itself.
       // Supabase caps a single request at 1000 rows, so we batch with range().
       const seen = new Map<string, { store_name: string; brand: Brand }>()
       const PAGE = 1000
@@ -42,12 +45,18 @@ export default function SettingsClient() {
       while (true) {
         const { data } = await supabase
           .from('deliveries')
-          .select('store_code, store_name, brand')
+          .select('store_code, store_name, brand, ibt_from')
           .range(offset, offset + PAGE - 1)
         if (!data || data.length === 0) break
         for (const d of data as any[]) {
           if (!seen.has(d.store_code)) {
             seen.set(d.store_code, { store_name: d.store_name, brand: d.brand })
+          }
+          if (isWebstoreName(d.store_name) && d.ibt_from) {
+            const originName = (d.ibt_from as string).trim()
+            if (!seen.has(originName)) {
+              seen.set(originName, { store_name: originName, brand: d.brand })
+            }
           }
         }
         if (data.length < PAGE) break

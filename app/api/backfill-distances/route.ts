@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
-import { geocodeStructuredAddress, type GeocodeOutcome } from '@/lib/geocoding'
+import { geocodeAddress, geocodeStructuredAddress, type GeocodeOutcome } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
+import { resolveOriginStore } from '@/lib/origin-store'
 
 export const runtime = 'nodejs'
 export const maxDuration = 55
@@ -38,21 +39,47 @@ export async function GET(request: NextRequest) {
     return [row.street, row.city, row.country].map((s) => (s ?? '').trim().toLowerCase()).join('|')
   }
 
-  async function getStoreLoc(storeCode: string) {
-    if (storeCache.has(storeCode)) return storeCache.get(storeCode)!
+  // Resolves store coordinates for a delivery row, honoring IBT From for
+  // webstore deliveries (see resolveOriginStore) — geocodes fresh on a miss,
+  // same as the import route, since this is the only place some IBT-origin
+  // stores will ever get looked up for the first time.
+  async function getOriginStoreLoc(row: { store_code: string; store_name: string; ibt_from: string | null; brand: string }) {
+    const origin = resolveOriginStore(row)
+    if (storeCache.has(origin.storeCode)) return storeCache.get(origin.storeCode)!
+
     const { data } = await supabase
       .from('store_locations')
       .select('lat, lon')
-      .eq('store_code', storeCode)
+      .eq('store_code', origin.storeCode)
       .maybeSingle()
-    const loc = (data?.lat != null && data?.lon != null)
-      ? { lat: data.lat as number, lon: data.lon as number }
-      : null
-    storeCache.set(storeCode, loc)
+
+    let loc: { lat: number; lon: number } | null =
+      (data?.lat != null && data?.lon != null) ? { lat: data.lat as number, lon: data.lon as number } : null
+
+    if (!loc) {
+      const query = `${origin.storeName} South Africa`
+      await sleep(1100)  // Nominatim ToS: max 1 req/sec
+      const geo = await geocodeAddress(query)
+      if (geo) {
+        loc = { lat: geo.lat, lon: geo.lon }
+        await supabase.from('store_locations').upsert({
+          store_code: origin.storeCode,
+          store_name: origin.storeName,
+          brand: row.brand,
+          lat: geo.lat,
+          lon: geo.lon,
+          geocoded_at: new Date().toISOString(),
+          geocode_query: query,
+        })
+      }
+    }
+
+    storeCache.set(origin.storeCode, loc)
     return loc
   }
 
   let processed = 0
+  let pass0Found = 0
   let pass1Found = 0
   let pass2Found = 0
   const errors: string[] = []
@@ -60,6 +87,45 @@ export async function GET(request: NextRequest) {
     if (!error) return
     console.error(`[backfill-distances] update failed for row_hash=${rowHash}: ${error.message}`)
     if (errors.length < 5) errors.push(`${rowHash}: ${error.message}`)
+  }
+
+  // --- Pass 0: retroactively correct webstore/IBT rows already given a
+  // distance under the old (webstore's own store) coordinates. Only ever
+  // matches webstore + ibt_from rows, so it's a permanent no-op for
+  // everything else once each matching row is marked backfilled. ---
+  const { data: ibtOriginRows } = await supabase
+    .from('deliveries')
+    .select('row_hash, store_code, store_name, brand, ibt_from, customer_lat, customer_lon')
+    .ilike('store_name', '%webstore%')
+    .not('ibt_from', 'is', null)
+    .not('distance_km', 'is', null)
+    .eq('ibt_origin_backfilled', false)
+    .limit(batchSize)
+
+  pass0Found = (ibtOriginRows ?? []).length
+
+  for (const row of (ibtOriginRows ?? [])) {
+    if (timedOut(start)) break
+    if (row.customer_lat == null || row.customer_lon == null) {
+      const { error } = await supabase.from('deliveries').update({ ibt_origin_backfilled: true }).eq('row_hash', row.row_hash)
+      logWriteError(row.row_hash, error)
+      continue
+    }
+
+    const storeLoc = await getOriginStoreLoc(row)
+    let distanceKm: number | null = null
+    if (storeLoc) {
+      const distanceResult = await getDrivingDistanceKm(storeLoc, { lat: row.customer_lat, lon: row.customer_lon })
+      if ('km' in distanceResult) distanceKm = distanceResult.km
+    }
+
+    const { error: updateError } = await supabase
+      .from('deliveries')
+      .update({ distance_km: distanceKm, ibt_origin_backfilled: true })
+      .eq('row_hash', row.row_hash)
+    logWriteError(row.row_hash, updateError)
+
+    processed++
   }
 
   // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
@@ -73,7 +139,7 @@ export async function GET(request: NextRequest) {
   // forever since the remaining-count queries below exclude them too.
   const { data: ungeocodedRows } = await supabase
     .from('deliveries')
-    .select('row_hash, store_code, brand, street, city, country')
+    .select('row_hash, store_code, store_name, brand, ibt_from, street, city, country')
     .is('customer_lat', null)
     .eq('geocode_failed', false)
     .limit(batchSize)
@@ -123,7 +189,7 @@ export async function GET(request: NextRequest) {
     const customerLat = geo.lat
     const customerLon = geo.lon
 
-    const storeLoc = await getStoreLoc(row.store_code)
+    const storeLoc = await getOriginStoreLoc(row)
     let distanceKm: number | null = null
     if (storeLoc) {
       const distanceResult = await getDrivingDistanceKm(storeLoc, { lat: customerLat, lon: customerLon })
@@ -145,7 +211,7 @@ export async function GET(request: NextRequest) {
   if (pass1Found === 0) {
     const { data: pendingRows } = await supabase
       .from('deliveries')
-      .select('row_hash, store_code, customer_lat, customer_lon')
+      .select('row_hash, store_code, store_name, brand, ibt_from, customer_lat, customer_lon')
       .is('distance_km', null)
       .not('customer_lat', 'is', null)
       .eq('distance_failed', false)
@@ -158,7 +224,7 @@ export async function GET(request: NextRequest) {
       if (timedOut(start)) break
       if (row.customer_lat == null) continue
 
-      const storeLoc = await getStoreLoc(row.store_code)
+      const storeLoc = await getOriginStoreLoc(row)
       if (!storeLoc) {
         const { error: updateError } = await supabase
           .from('deliveries')
@@ -226,8 +292,8 @@ export async function GET(request: NextRequest) {
     remaining: (noCoords ?? 0) + (noDistance ?? 0),
     distanceFailed: distanceFailed ?? 0,
     rateLimited,
-    // True only when both passes found zero rows to attempt — caller should stop.
-    exhausted: pass1Found === 0 && pass2Found === 0,
+    // True only when every pass found zero rows to attempt — caller should stop.
+    exhausted: pass0Found === 0 && pass1Found === 0 && pass2Found === 0,
     errors,
   })
 }

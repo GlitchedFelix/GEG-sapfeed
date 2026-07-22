@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server'
 import { parseSapExport } from '@/lib/sap-parser'
 import { geocodeAddress, geocodeStructuredAddress, type GeocodeOutcome } from '@/lib/geocoding'
 import { getDrivingDistanceKm } from '@/lib/routing'
+import { resolveOriginStore } from '@/lib/origin-store'
 import type { ImportResult } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -95,29 +96,32 @@ export async function POST(request: NextRequest) {
     }
 
     for (const record of newRecords) {
-      // 1. Resolve store coordinates (from DB or geocode fresh)
+      // 1. Resolve store coordinates (from DB or geocode fresh). Webstore
+      // deliveries with an IBT From use that store's coordinates instead of
+      // the (address-less) webstore's own — see resolveOriginStore.
+      const origin = resolveOriginStore(record)
       let storeLoc: { lat: number; lon: number } | null = null
 
-      if (storeCoordCache.has(record.store_code)) {
-        storeLoc = storeCoordCache.get(record.store_code)!
+      if (storeCoordCache.has(origin.storeCode)) {
+        storeLoc = storeCoordCache.get(origin.storeCode)!
       } else {
         const { data: existing } = await supabase
           .from('store_locations')
           .select('lat, lon')
-          .eq('store_code', record.store_code)
+          .eq('store_code', origin.storeCode)
           .maybeSingle()
 
         if (existing?.lat != null && existing?.lon != null) {
           storeLoc = { lat: existing.lat, lon: existing.lon }
         } else {
-          const query = `${record.store_name} South Africa`
+          const query = `${origin.storeName} South Africa`
           await sleep(1100)  // Nominatim ToS: max 1 req/sec
           const geo = await geocodeAddress(query)
           if (geo) {
             storeLoc = { lat: geo.lat, lon: geo.lon }
             await supabase.from('store_locations').upsert({
-              store_code: record.store_code,
-              store_name: record.store_name,
+              store_code: origin.storeCode,
+              store_name: origin.storeName,
               brand: record.brand,
               lat: geo.lat,
               lon: geo.lon,
@@ -126,7 +130,7 @@ export async function POST(request: NextRequest) {
             })
           }
         }
-        storeCoordCache.set(record.store_code, storeLoc)
+        storeCoordCache.set(origin.storeCode, storeLoc)
       }
 
       // 2. Geocode customer delivery address

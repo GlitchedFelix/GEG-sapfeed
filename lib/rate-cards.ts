@@ -1,11 +1,12 @@
 import type { Brand, RateCard, RateCardCell, RateCardDistanceBand, RateCardWeightBand, RateSystem } from '@/lib/types'
+import { isWebstoreName } from '@/lib/store-utils'
 
 // Routes a delivery to its rate card system. CTM always uses the CTM
 // system; Italtile splits into its webstore (identified by store name)
 // vs every other physical store.
 export function getRateSystemForRow(brand: Brand, storeName: string | null): RateSystem {
   if (brand === 'CTM') return 'CTM'
-  return storeName && /webstore/i.test(storeName) ? 'ITALTILE_WEBSTORE' : 'ITALTILE_STORE'
+  return isWebstoreName(storeName) ? 'ITALTILE_WEBSTORE' : 'ITALTILE_STORE'
 }
 
 // Picks the rate card in force on a given delivery date: the one with the

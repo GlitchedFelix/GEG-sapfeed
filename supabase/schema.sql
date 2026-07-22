@@ -167,6 +167,17 @@ alter table deliveries
   add column if not exists distance_fail_reason text;
 
 -- ---------------------------------------------------------------------
+-- 5b. IBT-origin distance correction migration.
+--    Webstore deliveries (store name matches "webstore") that carry an
+--    IBT From should use that store's coordinates, not the webstore's own
+--    (address-less) ones. This sentinel tracks which already-imported rows
+--    have had their distance_km retroactively recomputed under that rule —
+--    same one-time-correction pattern as geocode_failed/distance_failed.
+-- ---------------------------------------------------------------------
+alter table deliveries
+  add column if not exists ibt_origin_backfilled boolean not null default false;
+
+-- ---------------------------------------------------------------------
 -- 6. Rate cards feature migration.
 --    Effective-dated payout grids: distance bands (columns) x weight
 --    bands (rows) -> a ZAR amount per cell. A delivery's payout uses
