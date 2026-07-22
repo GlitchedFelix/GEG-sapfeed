@@ -7,8 +7,6 @@ import { resolveOriginStore } from '@/lib/origin-store'
 export const runtime = 'nodejs'
 export const maxDuration = 55
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
 // Stop starting new rows once this much wall-clock time has elapsed, leaving
 // headroom under maxDuration for the trailing count queries + response. This
 // (not the row-count batch size) is what actually bounds an invocation, so
@@ -24,15 +22,15 @@ export async function GET(request: NextRequest) {
   const start = Date.now()
 
   const batchSize = Math.min(
-    parseInt(request.nextUrl.searchParams.get('batch') ?? '10', 10),
-    50
+    parseInt(request.nextUrl.searchParams.get('batch') ?? '25', 10),
+    150
   )
 
   // Cache store coords within this call
   const storeCache = new Map<string, { lat: number; lon: number } | null>()
 
   // Cache customer geocodes by normalized address within this call, so
-  // repeat customer addresses in the same batch cost one Nominatim
+  // repeat customer addresses in the same batch cost one Mapbox
   // round-trip instead of one per row.
   const geoCache = new Map<string, GeocodeOutcome>()
   function addressKey(row: { street: string | null; city: string | null; country: string | null }) {
@@ -58,7 +56,6 @@ export async function GET(request: NextRequest) {
 
     if (!loc) {
       const query = `${origin.storeName} South Africa`
-      await sleep(1100)  // Nominatim ToS: max 1 req/sec
       const geo = await geocodeAddress(query)
       if (geo) {
         loc = { lat: geo.lat, lon: geo.lon }
@@ -130,7 +127,7 @@ export async function GET(request: NextRequest) {
 
   // --- Pass 1: geocode customer addresses that haven't been attempted yet ---
   // Using customer_lat IS NULL + geocode_failed=false as the sentinel so rows
-  // aren't re-processed once Nominatim has already failed for them.
+  // aren't re-processed once Mapbox has already failed to match them.
   // Rows lacking every address part (street/city/country all null) fall
   // through to the addressParts.length === 0 check below and get marked
   // geocode_failed permanently — they must stay in this query's candidate
@@ -165,11 +162,10 @@ export async function GET(request: NextRequest) {
     // reuse across rows, even within the same city/country, since two
     // addresses in the same city can be kilometers apart. Exact repeat
     // addresses within this batch (same customer, multiple deliveries) do
-    // reuse a cached result instead of re-hitting Nominatim.
+    // reuse a cached result instead of re-hitting Mapbox.
     const key = addressKey(row)
     let geo = geoCache.get(key)
     if (!geo) {
-      await sleep(1100)
       geo = await geocodeStructuredAddress({ street: row.street, city: row.city, country: row.country })
       // Don't cache a transient failure — worth a fresh attempt if the same
       // address recurs later in this batch.
@@ -238,7 +234,6 @@ export async function GET(request: NextRequest) {
         storeLoc,
         { lat: row.customer_lat, lon: row.customer_lon }
       )
-      await sleep(150)
 
       if ('error' in distanceResult) {
         if (distanceResult.error === 'rate_limited') {

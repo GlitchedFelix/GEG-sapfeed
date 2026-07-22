@@ -1,14 +1,14 @@
 // Regex-based cleanup for the noisy `street` values in SAP delivery exports,
-// applied just before geocoding. Targets the specific noise patterns already
-// known to break Nominatim's structured street= search (see the fallback
-// comment in geocoding.ts): unit/shop/suite numbers, and "Cnr X & Y"
-// cross-street notation. Deliberately does NOT try to strip mall/complex
-// names — those are arbitrary proper nouns with no reliable pattern, and in
-// small towns without formal street addressing the complex name is
-// sometimes the only thing Nominatim can resolve at all.
+// applied just before geocoding. Targets noise patterns known to break a
+// structured street-level geocode query (see the fallback comment in
+// geocoding.ts): unit/shop/suite numbers, and "Cnr X & Y" cross-street
+// notation. Deliberately does NOT try to strip mall/complex names — those
+// are arbitrary proper nouns with no reliable pattern, and in small towns
+// without formal street addressing the complex name is sometimes the only
+// thing the geocoder can resolve at all.
 
 export interface CleanedStreet {
-  /** Value to send as Nominatim's structured street= param (single road name). */
+  /** Value to send as the geocoder's structured street param (single road name). */
   structured: string
   /** Value to fold into the free-text fallback query (keeps both cross-streets). */
   freeText: string

@@ -8,8 +8,6 @@ import type { ImportResult } from '@/lib/types'
 
 export const runtime = 'nodejs'
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
 export async function POST(request: NextRequest) {
   const supabase = createClient()
 
@@ -89,7 +87,7 @@ export async function POST(request: NextRequest) {
     const storeCoordCache = new Map<string, { lat: number; lon: number } | null>()
 
     // Cache customer geocodes by normalized address so repeat customers in
-    // the same import batch don't each cost a separate Nominatim round-trip.
+    // the same import batch don't each cost a separate Mapbox round-trip.
     const customerGeoCache = new Map<string, GeocodeOutcome>()
     function customerAddressKey(record: { street: string | null; city: string | null; country: string | null }) {
       return [record.street, record.city, record.country].map((s) => (s ?? '').trim().toLowerCase()).join('|')
@@ -115,7 +113,6 @@ export async function POST(request: NextRequest) {
           storeLoc = { lat: existing.lat, lon: existing.lon }
         } else {
           const query = `${origin.storeName} South Africa`
-          await sleep(1100)  // Nominatim ToS: max 1 req/sec
           const geo = await geocodeAddress(query)
           if (geo) {
             storeLoc = { lat: geo.lat, lon: geo.lon }
@@ -140,7 +137,6 @@ export async function POST(request: NextRequest) {
       const addressKey = customerAddressKey(record)
       let customerGeo = customerGeoCache.get(addressKey)
       if (!customerGeo) {
-        await sleep(1100)  // Nominatim ToS: max 1 req/sec
         customerGeo = await geocodeStructuredAddress({
           street: record.street,
           city: record.city,

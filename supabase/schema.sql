@@ -555,3 +555,50 @@ where geocode_failed = true and customer_lat is null;
 -- geocode_failed/customer_lat-is-null counts before and after to confirm
 -- the change actually improved the match rate (same signal used to catch
 -- section 10's incident) before assuming it worked.
+
+-- ---------------------------------------------------------------------
+-- 13. One-time data fix: re-geocode everything through Mapbox.
+--    lib/geocoding.ts and lib/routing.ts switched from Nominatim/OSRM to
+--    Mapbox. Existing customer_lat/customer_lon/distance_km and
+--    store_locations coordinates were computed by the old services, so
+--    every non-manual row needs to be reset and re-run through the
+--    backfill job to pick up Mapbox-derived values. Deploy the Mapbox
+--    code change first and confirm it actually works (e.g. import one
+--    new file, or watch a few backfill rows process) before running the
+--    updates below — this resets the whole table at once, so there is a
+--    window where most rows show as pending in the Distances tab until
+--    the backfill job fully drains.
+-- ---------------------------------------------------------------------
+
+-- Run these first and review the row counts before committing to the reset.
+select count(*) as deliveries_to_reset from deliveries where distance_manual = false;
+select count(*) as stores_to_reset from store_locations where geocode_query is distinct from 'manual';
+
+-- distance_manual rows are user-entered overrides — never reset those.
+update deliveries
+set customer_lat = null,
+    customer_lon = null,
+    distance_km = null,
+    geocode_failed = false,
+    distance_failed = false,
+    distance_fail_reason = null,
+    ibt_origin_backfilled = false
+where distance_manual = false;
+
+-- geocode_query = 'manual' rows are user-entered store coordinates (Settings
+-- tab) — never reset those. Everything else gets re-geocoded fresh via
+-- Mapbox next time it's looked up (both API routes already re-geocode a
+-- store on a null lat/lon hit, so no code change is needed for this).
+update store_locations
+set lat = null,
+    lon = null,
+    geocoded_at = null,
+    geocode_query = null
+where geocode_query is distinct from 'manual';
+
+-- Then repeatedly click "Backfill distances" in the Distances tab (or let
+-- its polling loop run) until it reports exhausted: true. Before running
+-- the updates above, export a CSV snapshot of the current distance_km
+-- values (existing export button in the Distances tab) so the new
+-- Mapbox-derived distances can be spot-checked against the old ones
+-- afterwards — a systematic offset here would change real payout amounts.
