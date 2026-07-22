@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
-import { getApplicableRateCard, computePayout, computeItaltilePayout, getRateSystemForRow } from '@/lib/rate-cards'
+import { getApplicableRateCard, computePayout, computeItaltilePayout, getRateSystemForRow, type PayoutResult } from '@/lib/rate-cards'
 import type {
   Brand,
   DeliveryRecord,
@@ -114,11 +114,11 @@ export default function PayoutClient() {
   }, [supabase])
 
   const getPayout = useCallback(
-    (row: Pick<Row, 'brand' | 'store_name' | 'delivery_date' | 'distance_km' | 'net_weight_kg'>): number | null => {
+    (row: Pick<Row, 'brand' | 'store_name' | 'delivery_date' | 'distance_km' | 'net_weight_kg'>): PayoutResult => {
       const system = getRateSystemForRow(row.brand, row.store_name)
       const systemCards = rateCards.filter((c) => c.system === system)
       const card = getApplicableRateCard(systemCards, row.delivery_date)
-      if (!card) return null
+      if (!card) return { amount: null, outOfRange: false }
 
       const systemDistanceBands = distanceBands.filter((b) => b.system === system)
       const systemWeightBands = weightBands.filter((b) => b.system === system)
@@ -202,7 +202,7 @@ export default function PayoutClient() {
       ).range(statsOffset, statsOffset + STATS_BATCH - 1)
       if (statsError) { statsOk = false; break }
       for (const r of (statsRows as Row[] | null) || []) {
-        const payout = getPayout(r)
+        const payout = getPayout(r).amount
         const diff = getDiff(r, payout)
         s.deliveryCount++
         s.totalTransport1 += r.transport1_amount_zar || 0
@@ -301,8 +301,8 @@ export default function PayoutClient() {
       const header = EXPORT_COLS.map(csvEscape).join(',')
       const body = allRows.map((row) => {
         const { code, name } = parseStoreName(row.store_name ?? '')
-        const payout = getPayout(row)
-        const diff = getDiff(row, payout)
+        const result = getPayout(row)
+        const diff = getDiff(row, result.amount)
         const cells = [
           row.delivery_date ?? '',
           row.billing_document ?? '',
@@ -315,7 +315,7 @@ export default function PayoutClient() {
           row.distance_km ?? '',
           row.transport1_amount_zar ?? '',
           row.transport2_amount_zar ?? '',
-          payout ?? '',
+          result.outOfRange ? 'Custom quote' : (result.amount ?? ''),
           diff ?? '',
         ]
         return cells.map((c) => csvEscape(String(c))).join(',')
@@ -344,6 +344,7 @@ export default function PayoutClient() {
       ? '—'
       : new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0, signDisplay: 'exceptZero' }).format(n)
   const formatKg = (n: number) => `${new Intl.NumberFormat('en-ZA', { maximumFractionDigits: 0 }).format(n)} kg`
+  const formatPayout = (result: PayoutResult) => (result.outOfRange ? 'Custom quote' : formatZar(result.amount))
 
   const COLS: { key: string; label: string; sortable: boolean }[] = [
     { key: 'delivery_date', label: 'Date', sortable: true },
@@ -522,8 +523,8 @@ export default function PayoutClient() {
             ) : (
               rows.map((row, i) => {
                 const { code, name } = parseStoreName(row.store_name ?? '')
-                const payout = getPayout(row)
-                const diff = getDiff(row, payout)
+                const payoutResult = getPayout(row)
+                const diff = getDiff(row, payoutResult.amount)
                 return (
                   <tr key={i} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
                     <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">{row.delivery_date ?? '—'}</td>
@@ -541,7 +542,7 @@ export default function PayoutClient() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium text-slate-800">{formatZar(row.transport1_amount_zar)}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium text-slate-800">{formatZar(row.transport2_amount_zar)}</td>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-semibold text-slate-900">{formatZar(payout)}</td>
+                    <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-semibold text-slate-900">{formatPayout(payoutResult)}</td>
                     <td className={cn(
                       'whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium',
                       diff == null ? 'text-slate-400' : diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-600' : 'text-slate-700'
