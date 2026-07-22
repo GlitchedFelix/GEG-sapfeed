@@ -1,17 +1,17 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase-server'
 import NavBar from '@/components/NavBar'
-import SearchClient from '@/components/SearchClient'
+import DistanceTabs from '@/components/DistanceTabs'
 
-export default async function SearchPage() {
+export default async function DistancePage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen">
       <NavBar />
-      <SearchClient />
+      <DistanceTabs />
     </div>
   )
 }

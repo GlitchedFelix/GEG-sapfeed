@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { parseStoreName } from '@/lib/store-utils'
+import { failReasonLabel } from '@/lib/distance-fail-reasons'
 import type { Brand, DeliveryRecord } from '@/lib/types'
 import Panel from '@/components/ui/Panel'
 import Button from '@/components/ui/Button'
@@ -19,8 +20,6 @@ type SortDir = 'asc' | 'desc'
 
 const PAGE_SIZE = 50
 
-const NUMERIC_COLS = new Set(['distance_km'])
-
 interface Row extends Pick<
   DeliveryRecord,
   | 'row_hash'
@@ -34,8 +33,9 @@ interface Row extends Pick<
   | 'country'
   | 'distance_km'
   | 'distance_manual'
-  | 'ibt_from'
-  | 'ibt_to'
+  | 'geocode_failed'
+  | 'distance_failed'
+  | 'distance_fail_reason'
 > {}
 
 const SELECT_FIELDS = [
@@ -50,15 +50,16 @@ const SELECT_FIELDS = [
   'country',
   'distance_km',
   'distance_manual',
-  'ibt_from',
-  'ibt_to',
+  'geocode_failed',
+  'distance_failed',
+  'distance_fail_reason',
 ].join(',')
 
-interface Props {
-  onSwitchToFailed?: () => void
+function rowFailReason(row: Pick<Row, 'geocode_failed' | 'distance_fail_reason'>): string | null {
+  return row.geocode_failed ? 'geocode_failed' : row.distance_fail_reason
 }
 
-export default function DistancesClient({ onSwitchToFailed }: Props) {
+export default function FailedDistancesClient() {
   const supabase = createClient()
 
   const [brand, setBrand] = useState<Brand | 'ALL'>('ALL')
@@ -66,21 +67,15 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
   const [dateTo, setDateTo] = useState('')
   const [storeFilters, setStoreFilters] = useState<string[]>([])
   const [storeOptions, setStoreOptions] = useState<{ value: string; label: string }[]>([])
-  const [sortKey, setSortKey] = useState('distance_km')
+  const [sortKey, setSortKey] = useState('delivery_date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
 
   const [rows, setRows] = useState<Row[]>([])
   const [totalCount, setTotalCount] = useState(0)
-  const [nullCount, setNullCount] = useState(0)
-  const [distanceFailedCount, setDistanceFailedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
-
-  const [backfilling, setBackfilling] = useState(false)
-  const [backfillRemaining, setBackfillRemaining] = useState<number | null>(null)
-  const [backfillProcessed, setBackfillProcessed] = useState(0)
 
   const applyFilters = useCallback(
     (query: any) => {
@@ -94,6 +89,11 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
     [brand, dateFrom, dateTo, storeFilters]
   )
 
+  const applyFailedFilter = useCallback(
+    (query: any) => query.is('distance_km', null).or('distance_failed.eq.true,geocode_failed.eq.true'),
+    []
+  )
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -101,8 +101,8 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
     const from = page * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
 
-    let rowQuery = applyFilters(
-      supabase.from('deliveries').select(SELECT_FIELDS, { count: 'exact' }).not('distance_km', 'is', null)
+    let rowQuery = applyFailedFilter(
+      applyFilters(supabase.from('deliveries').select(SELECT_FIELDS, { count: 'exact' }))
     )
     rowQuery = rowQuery.order(sortKey, { ascending: sortDir === 'asc' }).range(from, to)
 
@@ -115,28 +115,8 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
 
     setRows((data as Row[]) || [])
     setTotalCount(count || 0)
-
-    // Count deliveries that are still awaiting a distance (will be retried by backfill).
-    // Excludes rows that permanently failed geocoding too — those will never get
-    // a customer_lat, so they'd otherwise sit in "pending" forever even though
-    // the backfill will never touch them again.
-    const { count: noDistCount } = await applyFilters(
-      supabase.from('deliveries').select('*', { count: 'exact', head: true })
-        .is('distance_km', null).eq('distance_failed', false).eq('geocode_failed', false)
-    )
-    setNullCount(noDistCount || 0)
-
-    // Count deliveries that permanently failed to get a distance (won't be retried
-    // automatically) — either the address itself couldn't be geocoded, or the
-    // geocoded address couldn't get a driving distance.
-    const { count: failedCount } = await applyFilters(
-      supabase.from('deliveries').select('*', { count: 'exact', head: true })
-        .or('distance_failed.eq.true,geocode_failed.eq.true')
-    )
-    setDistanceFailedCount(failedCount || 0)
-
     setLoading(false)
-  }, [applyFilters, sortKey, sortDir, page, supabase])
+  }, [applyFilters, applyFailedFilter, sortKey, sortDir, page, supabase])
 
   useEffect(() => {
     fetchData()
@@ -174,59 +154,6 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
     setPage(0)
   }, [brand, dateFrom, dateTo, storeFilters, sortKey, sortDir])
 
-  async function runBackfill() {
-    setBackfilling(true)
-    setBackfillProcessed(0)
-    let totalProcessed = 0
-    let finalDistanceFailed = 0
-    let hadBlockingError = false
-    try {
-      while (true) {
-        const res = await fetch('/api/backfill-distances?batch=50')
-        if (!res.ok) { setError('Backfill request failed'); hadBlockingError = true; break }
-        const json = await res.json()
-        const processed: number = json.processed
-        const remaining: number = json.remaining
-        const remainingGeocode: number = json.remainingGeocode ?? remaining
-        const remainingDistance: number = json.remainingDistance ?? 0
-        const exhausted: boolean = json.exhausted ?? false
-        const distanceFailed: number = json.distanceFailed ?? 0
-        const rateLimited: number = json.rateLimited ?? 0
-        const writeErrors: string[] = json.errors ?? []
-        totalProcessed += processed
-        finalDistanceFailed = distanceFailed
-        setBackfillProcessed(totalProcessed)
-        setBackfillRemaining(remaining)
-        if (writeErrors.length > 0) {
-          setError(`Backfill write failed: ${writeErrors[0]}`)
-          hadBlockingError = true
-          break
-        }
-        if (remaining === 0) break
-        if (exhausted && remainingGeocode === 0 && remainingDistance > 0) {
-          // All geocodable addresses done but store coords missing for remaining rows
-          setError(`${remainingDistance} deliveries geocoded but need store coordinates. Add them in the Settings tab, then run backfill again.`)
-          hadBlockingError = true
-          break
-        }
-        if (exhausted) break
-        if (rateLimited > 0) {
-          // Mapping service is rate-limiting us — back off before the next batch.
-          await new Promise((r) => setTimeout(r, 2000))
-        }
-      }
-      if (!hadBlockingError && finalDistanceFailed > 0) {
-        setError(
-          `${finalDistanceFailed} deliveries could not get an automatic distance ` +
-          `(no matching store location or no road route found) and were skipped.`
-        )
-      }
-    } finally {
-      setBackfilling(false)
-      fetchData()
-    }
-  }
-
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
@@ -240,8 +167,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
   }
 
   const EXPORT_COLS = [
-    'Date', 'Billing Document', 'Store Code', 'Store Name', 'Street', 'City', 'Country',
-    'Distance (km)', 'Manual',
+    'Date', 'Billing Document', 'Store Code', 'Store Name', 'Street', 'City', 'Country', 'Fail Reason',
   ]
 
   async function exportCsv() {
@@ -256,9 +182,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
       // through in batches of 1000 until a batch comes back short.
       let offset = 0
       while (true) {
-        let q = applyFilters(
-          supabase.from('deliveries').select(SELECT_FIELDS).not('distance_km', 'is', null)
-        )
+        let q = applyFailedFilter(applyFilters(supabase.from('deliveries').select(SELECT_FIELDS)))
         q = q.order(sortKey, { ascending: sortDir === 'asc' }).range(offset, offset + BATCH - 1)
         const { data, error: fetchError } = await q
         if (fetchError) {
@@ -281,8 +205,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
           row.street ?? '',
           row.city ?? '',
           row.country ?? '',
-          row.distance_km ?? '',
-          row.distance_manual ? 'Yes' : '',
+          failReasonLabel(rowFailReason(row)),
         ]
         return cells.map((c) => csvEscape(String(c))).join(',')
       })
@@ -294,7 +217,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
       const today = new Date().toISOString().slice(0, 10)
       const a = document.createElement('a')
       a.href = url
-      a.download = `distances-${today}.csv`
+      a.download = `distances-failed-${today}.csv`
       a.click()
       URL.revokeObjectURL(url)
     } finally {
@@ -309,7 +232,8 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
     { key: 'billing_document', label: 'Billing Document', sortable: true },
     { key: 'store_code', label: 'Store', sortable: true },
     { key: 'address', label: 'To Address', sortable: false },
-    { key: 'distance_km', label: 'Distance (km)', sortable: true },
+    { key: 'fail_reason', label: 'Fail Reason', sortable: false },
+    { key: 'distance_km', label: 'Distance (km)', sortable: false },
   ]
 
   return (
@@ -366,33 +290,9 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
 
         <div className="h-6 w-px bg-slate-200" />
 
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <span>
-            <span className="font-semibold text-slate-900">{totalCount}</span> with distance
-            {nullCount > 0 && (
-              <span className="ml-2 text-amber-600">{nullCount} pending</span>
-            )}
-          </span>
-          {distanceFailedCount > 0 && (
-            onSwitchToFailed ? (
-              <button
-                onClick={onSwitchToFailed}
-                className="text-red-600 underline decoration-dotted underline-offset-2 hover:text-red-700"
-              >
-                {distanceFailedCount} failed
-              </button>
-            ) : (
-              <span className="text-red-600">{distanceFailedCount} failed</span>
-            )
-          )}
-          {nullCount > 0 && (
-            <Button variant="secondary" onClick={runBackfill} disabled={backfilling}>
-              {backfilling
-                ? `Geocoding… ${backfillProcessed} done, ${backfillRemaining ?? '?'} left`
-                : 'Backfill distances'}
-            </Button>
-          )}
-        </div>
+        <span className="text-xs text-slate-500">
+          <span className="font-semibold text-slate-900">{totalCount}</span> failed — enter a km value manually to resolve
+        </span>
 
         <div className="ml-auto flex gap-2">
           <Button variant="secondary" onClick={exportCsv} disabled={exporting || totalCount === 0}>
@@ -408,36 +308,32 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50/80">
-              {COLS.map((col) => {
-                const numeric = NUMERIC_COLS.has(col.key)
-                return (
-                  <th
-                    key={col.key}
+              {COLS.map((col) => (
+                <th
+                  key={col.key}
+                  className={cn(
+                    'whitespace-nowrap px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500',
+                    col.key === 'distance_km' ? 'text-right' : 'text-left'
+                  )}
+                >
+                  <button
+                    onClick={() => col.sortable && toggleSort(col.key)}
                     className={cn(
-                      'whitespace-nowrap px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500',
-                      numeric ? 'text-right' : 'text-left'
+                      'inline-flex items-center gap-0.5',
+                      col.sortable ? 'cursor-pointer hover:text-slate-900' : 'cursor-default'
                     )}
+                    disabled={!col.sortable}
                   >
-                    <button
-                      onClick={() => col.sortable && toggleSort(col.key)}
-                      className={cn(
-                        'inline-flex items-center gap-0.5',
-                        col.sortable ? 'cursor-pointer hover:text-slate-900' : 'cursor-default',
-                        numeric && 'flex-row-reverse'
-                      )}
-                      disabled={!col.sortable}
-                    >
-                      {col.label}
-                      {sortKey === col.key &&
-                        (sortDir === 'asc' ? (
-                          <ChevronUp className="h-3 w-3 text-accent-600" />
-                        ) : (
-                          <ChevronDown className="h-3 w-3 text-accent-600" />
-                        ))}
-                    </button>
-                  </th>
-                )
-              })}
+                    {col.label}
+                    {sortKey === col.key &&
+                      (sortDir === 'asc' ? (
+                        <ChevronUp className="h-3 w-3 text-accent-600" />
+                      ) : (
+                        <ChevronDown className="h-3 w-3 text-accent-600" />
+                      ))}
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -448,7 +344,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={COLS.length} className="px-3 py-10 text-center text-slate-400">
-                  No distance data yet. Import a SAP file to populate distances.
+                  No failed deliveries. Everything has a distance.
                 </td>
               </tr>
             ) : (
@@ -470,17 +366,19 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
                   <td className="px-3 py-1.5 text-slate-700">
                     {[row.street, row.city, row.country].filter(Boolean).join(', ') || '—'}
                   </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-red-600">
+                    {failReasonLabel(rowFailReason(row))}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-1.5">
                     <EditableDistanceCell
                       rowHash={row.row_hash}
                       value={row.distance_km}
                       manual={row.distance_manual}
-                      onSaved={(km) => {
-                        setRows((prev) =>
-                          prev.map((r) =>
-                            r.row_hash === row.row_hash ? { ...r, distance_km: km, distance_manual: true } : r
-                          )
-                        )
+                      onSaved={() => {
+                        // Once resolved, the row no longer matches this tab's failed
+                        // filter — drop it locally instead of waiting for a refetch.
+                        setRows((prev) => prev.filter((r) => r.row_hash !== row.row_hash))
+                        setTotalCount((c) => Math.max(0, c - 1))
                       }}
                     />
                   </td>

@@ -521,3 +521,16 @@ where d.city = g.city
 update deliveries
 set geocode_failed = false
 where geocode_failed = true and customer_lat is null;
+
+-- ---------------------------------------------------------------------
+-- 11. Manual distance entry.
+--    The Distances/Failed tabs let a user type a distance_km value in
+--    directly (to fix a wrong auto-computed value, or to resolve a
+--    permanently failed geocode/route). This flag marks those rows so the
+--    UI can show a "Manual" badge distinguishing them from geocoded ones.
+--    Saving a manual value also clears geocode_failed/distance_failed/
+--    distance_fail_reason, since the row now has a known distance and is
+--    no longer "failed" — this is what moves it off the Failed tab.
+-- ---------------------------------------------------------------------
+alter table deliveries
+  add column if not exists distance_manual boolean not null default false;

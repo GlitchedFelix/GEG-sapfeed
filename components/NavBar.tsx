@@ -5,6 +5,13 @@ import { usePathname, useRouter } from 'next/navigation'
 import { LogOut, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 
+const NAV_LINKS = [
+  { href: '/search', label: 'SAP' },
+  { href: '/import', label: 'Import' },
+  { href: '/distance', label: 'Distance' },
+  { href: '/payouts', label: 'Payouts' },
+]
+
 export default function NavBar() {
   const pathname = usePathname()
   const router = useRouter()
@@ -33,12 +40,11 @@ export default function NavBar() {
           <span className="text-sm font-semibold text-slate-900">GEG SAP Reports</span>
         </div>
         <div className="flex items-center gap-1">
-          <Link href="/search" className={linkClass('/search')}>
-            Search
-          </Link>
-          <Link href="/import" className={linkClass('/import')}>
-            Import
-          </Link>
+          {NAV_LINKS.map((link) => (
+            <Link key={link.href} href={link.href} className={linkClass(link.href)}>
+              {link.label}
+            </Link>
+          ))}
         </div>
       </div>
       <div className="flex items-center gap-3">

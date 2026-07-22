@@ -1,26 +1,24 @@
 'use client'
 
 import { useState } from 'react'
-import SearchClient from '@/components/SearchClient'
 import DistancesClient from '@/components/DistancesClient'
-import PayoutClient from '@/components/PayoutClient'
+import FailedDistancesClient from '@/components/FailedDistancesClient'
 import { cn } from '@/components/ui/cn'
 
-type Tab = 'search' | 'distances' | 'payout'
+type Tab = 'distances' | 'failed'
 
 const TAB_LABELS: Record<Tab, string> = {
-  search: 'Search',
   distances: 'Distances',
-  payout: 'Payout',
+  failed: 'Failed',
 }
 
-export default function SearchTabs() {
-  const [tab, setTab] = useState<Tab>('search')
+export default function DistanceTabs() {
+  const [tab, setTab] = useState<Tab>('distances')
 
   return (
     <>
       <div className="flex gap-6 border-b border-slate-200 bg-white px-5">
-        {(['search', 'distances', 'payout'] as Tab[]).map((t) => (
+        {(['distances', 'failed'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -36,9 +34,8 @@ export default function SearchTabs() {
         ))}
       </div>
       <div className="bg-slate-50">
-        {tab === 'search' && <SearchClient />}
-        {tab === 'distances' && <DistancesClient />}
-        {tab === 'payout' && <PayoutClient />}
+        {tab === 'distances' && <DistancesClient onSwitchToFailed={() => setTab('failed')} />}
+        {tab === 'failed' && <FailedDistancesClient />}
       </div>
     </>
   )

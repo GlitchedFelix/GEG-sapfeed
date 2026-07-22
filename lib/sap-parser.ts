@@ -239,6 +239,10 @@ export function parseSapExport(raw: string, filename: string): {
         customer_lat: null,
         customer_lon: null,
         distance_km: null,
+        geocode_failed: false,
+        distance_failed: false,
+        distance_fail_reason: null,
+        distance_manual: false,
       }
 
       if (!record.store_code || !record.delivery_number || !record.billing_document) {

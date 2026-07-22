@@ -28,6 +28,10 @@ export interface DeliveryRecord {
   customer_lat: number | null
   customer_lon: number | null
   distance_km: number | null
+  geocode_failed: boolean
+  distance_failed: boolean
+  distance_fail_reason: string | null
+  distance_manual: boolean
 }
 
 export interface ImportResult {
