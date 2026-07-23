@@ -32,6 +32,7 @@ export interface DeliveryRecord {
   distance_failed: boolean
   distance_fail_reason: string | null
   distance_manual: boolean
+  geocode_precise: boolean
 }
 
 export interface ImportResult {

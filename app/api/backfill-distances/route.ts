@@ -194,7 +194,12 @@ export async function GET(request: NextRequest) {
 
     const { error: updateError } = await supabase
       .from('deliveries')
-      .update({ customer_lat: customerLat, customer_lon: customerLon, distance_km: distanceKm })
+      .update({
+        customer_lat: customerLat,
+        customer_lon: customerLon,
+        distance_km: distanceKm,
+        geocode_precise: geo.precise,
+      })
       .eq('row_hash', row.row_hash)
     logWriteError(row.row_hash, updateError)
 

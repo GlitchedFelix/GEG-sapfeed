@@ -121,12 +121,25 @@ describe('geocodeStructuredAddress', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('rejects a free-text fallback that only resolves to a locality-level match', async () => {
+  it('accepts a free-text fallback that only resolves to a locality-level match, marked imprecise', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(200, { features: [] }))
       .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 2, lon: 2, featureType: 'place', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
+        })],
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await geocodeStructuredAddress({ street: 'some unresolvable place', city: 'Melville', country: 'ZA' })
+    expect(result).toEqual({ lat: 2, lon: 2, displayName: '', precise: false })
+  })
+
+  it('still rejects a free-text fallback whose city does not match', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { features: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        features: [feature({
+          lat: 2, lon: 2, featureType: 'place', countryCode: 'za', countryName: 'South Africa', placeName: 'Sandton',
         })],
       }))
     vi.stubGlobal('fetch', fetchMock)

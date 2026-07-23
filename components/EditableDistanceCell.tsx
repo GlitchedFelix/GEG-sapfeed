@@ -10,10 +10,11 @@ interface Props {
   rowHash: string
   value: number | null
   manual: boolean
+  precise?: boolean
   onSaved: (km: number) => void
 }
 
-export default function EditableDistanceCell({ rowHash, value, manual, onSaved }: Props) {
+export default function EditableDistanceCell({ rowHash, value, manual, precise = true, onSaved }: Props) {
   const supabase = createClient()
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState(value != null ? String(value) : '')
@@ -93,10 +94,19 @@ export default function EditableDistanceCell({ rowHash, value, manual, onSaved }
 
   return (
     <div className="flex items-center justify-end gap-1.5">
-      {manual && (
+      {manual ? (
         <span className="rounded bg-accent-50 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent-700">
           Manual
         </span>
+      ) : (
+        value != null && !precise && (
+          <span
+            className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700"
+            title="Geocoded to city/suburb, not an exact street match"
+          >
+            Approx
+          </span>
+        )
       )}
       <span className={cn('tabular-nums font-semibold text-slate-900', value == null && 'font-normal text-slate-400')}>
         {value != null ? `${value} km` : '—'}

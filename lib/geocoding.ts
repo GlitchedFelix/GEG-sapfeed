@@ -141,7 +141,6 @@ export async function geocodeStructuredAddress(parts: {
       return { error: 'http_error' }
     }
 
-    let fellBackToFreeText = false
     if (!feature) {
       // Structured field-by-field search can fail to resolve messy `street`
       // values (shop/complex names, "Cnr X & Y", unit numbers) that a single
@@ -149,7 +148,6 @@ export async function geocodeStructuredAddress(parts: {
       // free-text form before giving up.
       const freeText = [cleaned.freeText, parts.city, parts.country].filter(Boolean).join(', ')
       if (!freeText) return { error: 'no_match' }
-      fellBackToFreeText = true
       try {
         feature = await mapboxSearch(new URLSearchParams({ q: freeText, limit: '1' }))
       } catch {
@@ -161,12 +159,14 @@ export async function geocodeStructuredAddress(parts: {
     const properties = feature.properties ?? {}
     if (!sanityCheck(properties, parts)) return { error: 'no_match' }
 
+    // sanityCheck already confirmed the country and (if given) the
+    // city/locality actually match what was requested, so a free-text
+    // fallback that only resolves to a locality centroid — common for South
+    // African streets Mapbox has no address-level coverage for — is still a
+    // legitimate match, just a coarse one. Accept it rather than discarding
+    // it outright; `precise` lets callers keep it distinguishable/auditable
+    // instead of silently blending it with exact street-level matches.
     const precise = isPrecise(properties)
-    // The free-text fallback is the path most likely to have blended a
-    // messy `street` value into a plain locality guess — only trust it when
-    // the result actually resolved to a street/address, not just a matching
-    // city.
-    if (fellBackToFreeText && !precise) return { error: 'no_match' }
 
     const [lon, lat] = feature.geometry.coordinates
     return {

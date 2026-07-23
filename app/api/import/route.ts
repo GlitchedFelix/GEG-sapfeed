@@ -164,6 +164,7 @@ export async function POST(request: NextRequest) {
           customer_lat: customerGeo.lat,
           customer_lon: customerGeo.lon,
           distance_km: distanceKm,
+          geocode_precise: customerGeo.precise,
         })
         .eq('row_hash', record.row_hash)
     }

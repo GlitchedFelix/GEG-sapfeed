@@ -32,6 +32,7 @@ interface Stats {
   totalNetWeight: number
   totalPayout: number
   totalDiff: number
+  approxCount: number
 }
 
 const PAGE_SIZE = 50
@@ -51,6 +52,7 @@ interface Row extends Pick<
   | 'country'
   | 'net_weight_kg'
   | 'distance_km'
+  | 'geocode_precise'
   | 'transport1_amount_zar'
   | 'transport2_amount_zar'
 > {}
@@ -67,6 +69,7 @@ const SELECT_FIELDS = [
   'country',
   'net_weight_kg',
   'distance_km',
+  'geocode_precise',
   'transport1_amount_zar',
   'transport2_amount_zar',
 ].join(',')
@@ -193,7 +196,7 @@ export default function PayoutClient() {
     // Supabase caps un-ranged queries at 1000 rows, so we page through
     // in batches of 1000 (same pattern as CSV export) to get accurate totals.
     const STATS_BATCH = 1000
-    const s: Stats = { deliveryCount: 0, totalTransport1: 0, totalTransport2: 0, totalNetWeight: 0, totalPayout: 0, totalDiff: 0 }
+    const s: Stats = { deliveryCount: 0, totalTransport1: 0, totalTransport2: 0, totalNetWeight: 0, totalPayout: 0, totalDiff: 0, approxCount: 0 }
     let statsOffset = 0
     let statsOk = true
     while (true) {
@@ -210,6 +213,7 @@ export default function PayoutClient() {
         s.totalNetWeight += r.net_weight_kg || 0
         s.totalPayout += payout || 0
         s.totalDiff += diff || 0
+        if (r.geocode_precise === false) s.approxCount++
       }
       if (!statsRows || statsRows.length < STATS_BATCH) break
       statsOffset += STATS_BATCH
@@ -269,7 +273,7 @@ export default function PayoutClient() {
 
   const EXPORT_COLS = [
     'Date', 'Billing Document', 'Store Code', 'Store Name', 'Street', 'City', 'Country',
-    'Net Weight (kg)', 'Distance (km)', 'Transport 1', 'Transport 2', 'Payout (Rate Card)', 'Diff',
+    'Net Weight (kg)', 'Distance (km)', 'Approximate Distance', 'Transport 1', 'Transport 2', 'Payout (Rate Card)', 'Diff',
   ]
 
   async function exportCsv() {
@@ -313,6 +317,7 @@ export default function PayoutClient() {
           row.country ?? '',
           row.net_weight_kg ?? '',
           row.distance_km ?? '',
+          row.geocode_precise === false ? 'Yes' : '',
           row.transport1_amount_zar ?? '',
           row.transport2_amount_zar ?? '',
           result.outOfRange ? 'Custom quote' : (result.amount ?? ''),
@@ -458,6 +463,9 @@ export default function PayoutClient() {
             <StatCard label="Net" value={formatKg(stats.totalNetWeight)} />
             <StatCard label="Payout Total" value={formatZar(stats.totalPayout)} emphasis="primary" />
             <StatCard label="Diff Total" value={formatZarSigned(stats.totalDiff)} />
+            {stats.approxCount > 0 && (
+              <StatCard label="Approx. Distance" value={String(stats.approxCount)} />
+            )}
           </div>
         ) : (
           <span className="text-xs text-slate-400">Loading…</span>
@@ -538,7 +546,19 @@ export default function PayoutClient() {
                       {row.net_weight_kg != null ? `${row.net_weight_kg} kg` : '—'}
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-semibold text-slate-900">
-                      {row.distance_km != null ? `${row.distance_km} km` : '—'}
+                      {row.distance_km != null ? (
+                        <>
+                          {row.geocode_precise === false && (
+                            <span
+                              className="mr-1 text-amber-600"
+                              title="Geocoded to city/suburb, not an exact street match"
+                            >
+                              ~
+                            </span>
+                          )}
+                          {row.distance_km} km
+                        </>
+                      ) : '—'}
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium text-slate-800">{formatZar(row.transport1_amount_zar)}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium text-slate-800">{formatZar(row.transport2_amount_zar)}</td>

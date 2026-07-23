@@ -602,3 +602,42 @@ where geocode_query is distinct from 'manual';
 -- values (existing export button in the Distances tab) so the new
 -- Mapbox-derived distances can be spot-checked against the old ones
 -- afterwards — a systematic offset here would change real payout amounts.
+
+-- ---------------------------------------------------------------------
+-- 14. Geocode precision tracking + one-time retry of previously-discarded
+--    locality-level matches.
+--    geocodeStructuredAddress's free-text-fallback path used to discard
+--    any match that only resolved to a locality/place/neighborhood (not
+--    a street/address) as `no_match`, even though it had already passed
+--    the sanity check against the requested city/country. That discarded
+--    thousands of otherwise-legitimate South African addresses Mapbox
+--    simply has no street-level coverage for. The app now accepts these
+--    as a successful geocode, flagged geocode_precise=false so they stay
+--    auditable/spot-checkable before being trusted for payout amounts,
+--    distinct from a real street-level match.
+-- ---------------------------------------------------------------------
+alter table deliveries
+  add column if not exists geocode_precise boolean not null default true;
+
+-- Run this first and review the row count: rows previously marked
+-- geocode_failed with a real city value are the ones this change targets
+-- (a null/missing city was, and still is, rejected before any Mapbox
+-- call is made — see the addressParts check in backfill-distances).
+select count(*) as rows_to_retry
+from deliveries
+where geocode_failed = true and customer_lat is null
+  and distance_manual = false and city is not null;
+
+-- distance_manual rows are user-entered overrides — never reset those.
+update deliveries
+set geocode_failed = false
+where geocode_failed = true and customer_lat is null
+  and distance_manual = false and city is not null;
+
+-- Then click "Backfill distances" in the Distances tab (or let its
+-- polling loop run) to re-attempt these rows under the new policy.
+-- Watch the geocode_failed count before/after (same signal used in
+-- sections 10/12) to confirm the change actually improved the match
+-- rate, and spot-check a sample of newly-accepted geocode_precise=false
+-- rows' addresses/distances in the Distances tab before trusting them
+-- for payout amounts.

@@ -36,6 +36,7 @@ interface Row extends Pick<
   | 'geocode_failed'
   | 'distance_failed'
   | 'distance_fail_reason'
+  | 'geocode_precise'
 > {}
 
 const SELECT_FIELDS = [
@@ -53,6 +54,7 @@ const SELECT_FIELDS = [
   'geocode_failed',
   'distance_failed',
   'distance_fail_reason',
+  'geocode_precise',
 ].join(',')
 
 function rowFailReason(row: Pick<Row, 'geocode_failed' | 'distance_fail_reason'>): string | null {
@@ -368,6 +370,9 @@ export default function FailedDistancesClient() {
                   </td>
                   <td className="whitespace-nowrap px-3 py-1.5 text-red-600">
                     {failReasonLabel(rowFailReason(row))}
+                    {!row.geocode_failed && row.geocode_precise === false && (
+                      <span className="ml-1 text-amber-600">(approximate geocode)</span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-1.5">
                     <EditableDistanceCell

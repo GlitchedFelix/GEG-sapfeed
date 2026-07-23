@@ -34,6 +34,7 @@ interface Row extends Pick<
   | 'country'
   | 'distance_km'
   | 'distance_manual'
+  | 'geocode_precise'
   | 'ibt_from'
   | 'ibt_to'
 > {}
@@ -50,6 +51,7 @@ const SELECT_FIELDS = [
   'country',
   'distance_km',
   'distance_manual',
+  'geocode_precise',
   'ibt_from',
   'ibt_to',
 ].join(',')
@@ -74,6 +76,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
   const [totalCount, setTotalCount] = useState(0)
   const [nullCount, setNullCount] = useState(0)
   const [distanceFailedCount, setDistanceFailedCount] = useState(0)
+  const [approxCount, setApproxCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -134,6 +137,15 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
         .or('distance_failed.eq.true,geocode_failed.eq.true')
     )
     setDistanceFailedCount(failedCount || 0)
+
+    // Count resolved deliveries whose geocode only matched at city/suburb
+    // precision (not an exact street) — worth surfacing separately since
+    // they're auditable before being trusted for payout amounts.
+    const { count: approxCnt } = await applyFilters(
+      supabase.from('deliveries').select('*', { count: 'exact', head: true })
+        .not('distance_km', 'is', null).eq('geocode_precise', false).eq('distance_manual', false)
+    )
+    setApproxCount(approxCnt || 0)
 
     setLoading(false)
   }, [applyFilters, sortKey, sortDir, page, supabase])
@@ -241,7 +253,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
 
   const EXPORT_COLS = [
     'Date', 'Billing Document', 'Store Code', 'Store Name', 'Street', 'City', 'Country',
-    'Distance (km)', 'Manual',
+    'Distance (km)', 'Manual', 'Approximate',
   ]
 
   async function exportCsv() {
@@ -283,6 +295,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
           row.country ?? '',
           row.distance_km ?? '',
           row.distance_manual ? 'Yes' : '',
+          !row.distance_manual && !row.geocode_precise ? 'Yes' : '',
         ]
         return cells.map((c) => csvEscape(String(c))).join(',')
       })
@@ -371,6 +384,11 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
             <span className="font-semibold text-slate-900">{totalCount}</span> with distance
             {nullCount > 0 && (
               <span className="ml-2 text-amber-600">{nullCount} pending</span>
+            )}
+            {approxCount > 0 && (
+              <span className="ml-2 text-amber-600" title="Geocoded to city/suburb, not an exact street match">
+                {approxCount} approximate
+              </span>
             )}
           </span>
           {distanceFailedCount > 0 && (
@@ -475,6 +493,7 @@ export default function DistancesClient({ onSwitchToFailed }: Props) {
                       rowHash={row.row_hash}
                       value={row.distance_km}
                       manual={row.distance_manual}
+                      precise={row.geocode_precise}
                       onSaved={(km) => {
                         setRows((prev) =>
                           prev.map((r) =>
