@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { cleanStreet } from './address-clean'
 
 export interface GeoResult {
@@ -13,7 +14,16 @@ export type GeocodeOutcome =
   | (GeoResult & { precise: boolean })
   | { error: 'no_match' | 'http_error' }
 
-const MAPBOX_GEOCODE_URL = 'https://api.mapbox.com/search/geocode/v6/forward'
+// A suggestion returned by /suggest — no coordinates yet, those only come
+// back from /retrieve for whichever candidate the caller picks.
+export interface Suggestion {
+  mapboxId: string
+  name: string
+  placeFormatted?: string
+}
+
+const MAPBOX_SUGGEST_URL = 'https://api.mapbox.com/search/searchbox/v1/suggest'
+const MAPBOX_RETRIEVE_URL = 'https://api.mapbox.com/search/searchbox/v1/retrieve'
 
 let warnedMissingToken = false
 function mapboxToken(): string {
@@ -42,20 +52,71 @@ type MapboxFeature = {
   }
 }
 
+type MapboxSuggestion = {
+  mapbox_id: string
+  name: string
+  place_formatted?: string
+}
+
+// The Search Box API is session-based: a /suggest call and the /retrieve
+// call for whichever of its candidates gets picked must share one
+// session_token. There's no human typing in the batch pipeline, so each
+// address lookup here is simply its own one-shot "session".
+function newSessionToken(): string {
+  return randomUUID()
+}
+
 // Throws on a bad HTTP response (rate limit, 5xx, etc.) instead of returning
 // null, so callers can tell "the service failed" apart from "zero results" —
 // the former is transient and worth retrying, the latter isn't.
-async function mapboxSearch(params: URLSearchParams): Promise<MapboxFeature | null> {
-  params.set('access_token', mapboxToken())
-  const res = await fetch(`${MAPBOX_GEOCODE_URL}?${params.toString()}`)
+async function mapboxSuggest(
+  query: string,
+  sessionToken: string,
+  opts: { limit?: string; country?: string; types?: string } = {}
+): Promise<MapboxSuggestion[]> {
+  const params = new URLSearchParams({
+    q: query,
+    session_token: sessionToken,
+    access_token: mapboxToken(),
+    limit: opts.limit ?? '1',
+  })
+  if (opts.country) params.set('country', opts.country)
+  if (opts.types) params.set('types', opts.types)
+
+  const res = await fetch(`${MAPBOX_SUGGEST_URL}?${params.toString()}`)
+  if (!res.ok) throw new Error(`mapbox http ${res.status}`)
+  const data = await res.json()
+  return data.suggestions ?? []
+}
+
+async function mapboxRetrieve(mapboxId: string, sessionToken: string): Promise<MapboxFeature | null> {
+  const params = new URLSearchParams({
+    session_token: sessionToken,
+    access_token: mapboxToken(),
+  })
+  const res = await fetch(`${MAPBOX_RETRIEVE_URL}/${encodeURIComponent(mapboxId)}?${params.toString()}`)
   if (!res.ok) throw new Error(`mapbox http ${res.status}`)
   const data = await res.json()
   return data.features?.[0] ?? null
 }
 
+// Suggest, then retrieve the top candidate. Combines the two Search Box hops
+// into the single-feature-or-null shape the old one-call Geocoding v6 search
+// used to return, so callers below don't need to know it's now two requests.
+async function suggestAndRetrieveTop(
+  query: string,
+  opts: { country?: string; types?: string } = {}
+): Promise<MapboxFeature | null> {
+  const sessionToken = newSessionToken()
+  const suggestions = await mapboxSuggest(query, sessionToken, opts)
+  const top = suggestions[0]
+  if (!top) return null
+  return mapboxRetrieve(top.mapbox_id, sessionToken)
+}
+
 export async function geocodeAddress(query: string): Promise<GeoResult | null> {
   try {
-    const feature = await mapboxSearch(new URLSearchParams({ q: query, limit: '1' }))
+    const feature = await suggestAndRetrieveTop(query)
     if (!feature) return null
     const [lon, lat] = feature.geometry.coordinates
     return {
@@ -123,20 +184,23 @@ export async function geocodeStructuredAddress(parts: {
   try {
     const cleaned = cleanStreet(parts.street)
 
-    const params = new URLSearchParams({ limit: '1', types: 'address,street' })
-    if (cleaned.structured) params.set('address_line1', cleaned.structured)
-    if (parts.city) params.set('place', parts.city)
     // Mapbox's country filter only accepts ISO alpha-2 codes, unlike
     // Nominatim which also accepted a full country name in its structured
     // field. When SAP gives a full name, omit the param and rely entirely on
     // the sanity check below (same as it already backstops loose matches).
-    if (parts.country && /^[a-z]{2}$/i.test(parts.country.trim())) {
-      params.set('country', parts.country.trim().toLowerCase())
-    }
+    const countryFilter =
+      parts.country && /^[a-z]{2}$/i.test(parts.country.trim()) ? parts.country.trim().toLowerCase() : undefined
+
+    // Suggest is free-text only — there's no structured address_line1/place
+    // param like the old Geocoding v6 forward search had. First attempt
+    // mirrors that structured intent as a text query with a type restriction.
+    const structuredQuery = [cleaned.structured, parts.city, parts.country].filter(Boolean).join(', ')
 
     let feature: MapboxFeature | null
     try {
-      feature = await mapboxSearch(params)
+      feature = structuredQuery
+        ? await suggestAndRetrieveTop(structuredQuery, { country: countryFilter, types: 'address,street' })
+        : null
     } catch {
       return { error: 'http_error' }
     }
@@ -149,7 +213,7 @@ export async function geocodeStructuredAddress(parts: {
       const freeText = [cleaned.freeText, parts.city, parts.country].filter(Boolean).join(', ')
       if (!freeText) return { error: 'no_match' }
       try {
-        feature = await mapboxSearch(new URLSearchParams({ q: freeText, limit: '1' }))
+        feature = await suggestAndRetrieveTop(freeText, { country: countryFilter })
       } catch {
         return { error: 'http_error' }
       }
@@ -174,6 +238,42 @@ export async function geocodeStructuredAddress(parts: {
       lon,
       displayName: properties.full_address ?? properties.name ?? '',
       precise,
+    }
+  } catch {
+    return { error: 'http_error' }
+  }
+}
+
+// --- Interactive suggest/retrieve, for a human picking an address by hand ---
+// (see app/api/geocode-suggest, app/api/geocode-retrieve)
+
+export async function suggestAddresses(
+  query: string,
+  sessionToken: string
+): Promise<{ suggestions: Suggestion[] } | { error: 'http_error' }> {
+  try {
+    const raw = await mapboxSuggest(query, sessionToken, { limit: '5', country: 'za' })
+    return {
+      suggestions: raw.map((s) => ({ mapboxId: s.mapbox_id, name: s.name, placeFormatted: s.place_formatted })),
+    }
+  } catch {
+    return { error: 'http_error' }
+  }
+}
+
+// No sanityCheck here — a human picking a suggestion from the dropdown *is*
+// the validation step, unlike the batch pipeline's blind auto-pick above.
+export async function retrieveAddress(mapboxId: string, sessionToken: string): Promise<GeocodeOutcome> {
+  try {
+    const feature = await mapboxRetrieve(mapboxId, sessionToken)
+    if (!feature) return { error: 'no_match' }
+    const properties = feature.properties ?? {}
+    const [lon, lat] = feature.geometry.coordinates
+    return {
+      lat,
+      lon,
+      displayName: properties.full_address ?? properties.name ?? '',
+      precise: isPrecise(properties),
     }
   } catch {
     return { error: 'http_error' }

@@ -13,6 +13,7 @@ import SegmentedControl from '@/components/ui/SegmentedControl'
 import MultiSelect from '@/components/ui/MultiSelect'
 import Pagination from '@/components/ui/Pagination'
 import EditableDistanceCell from '@/components/EditableDistanceCell'
+import AddressSearchCell from '@/components/AddressSearchCell'
 import { fieldClass, fieldLabelClass } from '@/components/ui/fieldStyles'
 import { cn } from '@/components/ui/cn'
 
@@ -366,7 +367,29 @@ export default function FailedDistancesClient() {
                     })()}
                   </td>
                   <td className="px-3 py-1.5 text-slate-700">
-                    {[row.street, row.city, row.country].filter(Boolean).join(', ') || '—'}
+                    <AddressSearchCell
+                      rowHash={row.row_hash}
+                      street={row.street}
+                      city={row.city}
+                      country={row.country}
+                      onResolved={(result) => {
+                        if (result.distanceKm != null) {
+                          // Now has a distance — no longer matches this tab's failed filter.
+                          setRows((prev) => prev.filter((r) => r.row_hash !== row.row_hash))
+                          setTotalCount((c) => Math.max(0, c - 1))
+                        } else {
+                          // Address resolved but the row still fails for another reason
+                          // (e.g. no store location, no route) — update it in place.
+                          setRows((prev) =>
+                            prev.map((r) =>
+                              r.row_hash === row.row_hash
+                                ? { ...r, geocode_failed: false, distance_failed: true, distance_fail_reason: result.failReason }
+                                : r
+                            )
+                          )
+                        }
+                      }}
+                    />
                   </td>
                   <td className="whitespace-nowrap px-3 py-1.5 text-red-600">
                     {failReasonLabel(rowFailReason(row))}

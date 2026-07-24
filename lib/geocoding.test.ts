@@ -9,6 +9,10 @@ function jsonResponse(status: number, body: unknown) {
   }
 }
 
+function suggestion(mapboxId = 'mbx-1') {
+  return { mapbox_id: mapboxId, name: 'a place', place_formatted: 'a place, South Africa' }
+}
+
 function feature(opts: {
   lat: number
   lon: number
@@ -31,21 +35,34 @@ function feature(opts: {
   }
 }
 
+// Suggest + Retrieve is two sequential HTTP calls per lookup — this stubs
+// the pair as one mock, so existing single-match test cases stay readable.
+function stubSuggestThenRetrieve(retrieveBody: unknown, retrieveStatus = 200, suggestions = [suggestion()]) {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(jsonResponse(200, { suggestions }))
+    .mockResolvedValueOnce(jsonResponse(retrieveStatus, retrieveBody))
+  )
+}
+
 describe('geocodeAddress', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
   it('returns a GeoResult for a single matching feature', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      jsonResponse(200, { features: [feature({ lat: -26.1, lon: 28.0, fullAddress: 'Melville, South Africa' })] })
-    ))
+    stubSuggestThenRetrieve({ features: [feature({ lat: -26.1, lon: 28.0, fullAddress: 'Melville, South Africa' })] })
     const result = await geocodeAddress('Pick n Pay Melville South Africa')
     expect(result).toEqual({ lat: -26.1, lon: 28.0, displayName: 'Melville, South Africa' })
   })
 
-  it('returns null when no features match', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { features: [] })))
+  it('returns null when suggest finds no candidates', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { suggestions: [] })))
+    const result = await geocodeAddress('nonexistent place')
+    expect(result).toBeNull()
+  })
+
+  it('returns null when retrieve finds no feature', async () => {
+    stubSuggestThenRetrieve({ features: [] })
     const result = await geocodeAddress('nonexistent place')
     expect(result).toBeNull()
   })
@@ -69,14 +86,12 @@ describe('geocodeStructuredAddress', () => {
   })
 
   it('returns a precise match when country/city match and feature_type is address', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      jsonResponse(200, {
-        features: [feature({
-          lat: -26.1, lon: 28.0, fullAddress: '12 Church St, Melville, South Africa',
-          featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
-        })],
-      })
-    ))
+    stubSuggestThenRetrieve({
+      features: [feature({
+        lat: -26.1, lon: 28.0, fullAddress: '12 Church St, Melville, South Africa',
+        featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
+      })],
+    })
     const result = await geocodeStructuredAddress({ street: '12 Church St', city: 'Melville', country: 'ZA' })
     expect(result).toEqual({
       lat: -26.1, lon: 28.0, displayName: '12 Church St, Melville, South Africa', precise: true,
@@ -84,32 +99,31 @@ describe('geocodeStructuredAddress', () => {
   })
 
   it('rejects a result whose country does not match', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      jsonResponse(200, {
-        features: [feature({
-          lat: 1, lon: 1, featureType: 'address', countryCode: 'ke', countryName: 'Kenya', placeName: 'Melville',
-        })],
-      })
-    ))
+    stubSuggestThenRetrieve({
+      features: [feature({
+        lat: 1, lon: 1, featureType: 'address', countryCode: 'ke', countryName: 'Kenya', placeName: 'Melville',
+      })],
+    })
     const result = await geocodeStructuredAddress({ street: '12 Church St', city: 'Melville', country: 'ZA' })
     expect(result).toEqual({ error: 'no_match' })
   })
 
   it('rejects a result whose city does not match', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      jsonResponse(200, {
-        features: [feature({
-          lat: 1, lon: 1, featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Sandton',
-        })],
-      })
-    ))
+    stubSuggestThenRetrieve({
+      features: [feature({
+        lat: 1, lon: 1, featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Sandton',
+      })],
+    })
     const result = await geocodeStructuredAddress({ street: '12 Church St', city: 'Melville', country: 'ZA' })
     expect(result).toEqual({ error: 'no_match' })
   })
 
   it('falls back to free text and returns a precise result when the structured attempt finds nothing', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(200, { features: [] }))
+      // structured attempt: suggest -> no candidates
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [] }))
+      // free-text fallback: suggest -> retrieve
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [suggestion()] }))
       .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 2, lon: 2, featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
@@ -118,12 +132,13 @@ describe('geocodeStructuredAddress', () => {
     vi.stubGlobal('fetch', fetchMock)
     const result = await geocodeStructuredAddress({ street: 'Shop 4, Melrose Arch', city: 'Melville', country: 'ZA' })
     expect(result).toEqual({ lat: 2, lon: 2, displayName: '', precise: true })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('accepts a free-text fallback that only resolves to a locality-level match, marked imprecise', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(200, { features: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [suggestion()] }))
       .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 2, lon: 2, featureType: 'place', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
@@ -136,7 +151,8 @@ describe('geocodeStructuredAddress', () => {
 
   it('still rejects a free-text fallback whose city does not match', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(200, { features: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [suggestion()] }))
       .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 2, lon: 2, featureType: 'place', countryCode: 'za', countryName: 'South Africa', placeName: 'Sandton',
@@ -153,14 +169,14 @@ describe('geocodeStructuredAddress', () => {
     expect(result).toEqual({ error: 'http_error' })
   })
 
-  it('includes an ISO-2 country filter in the request URL', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, {
+  it('includes an ISO-2 country filter in the suggest request URL', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [suggestion()] }))
+      .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 1, lon: 1, featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
         })],
-      })
-    )
+      }))
     vi.stubGlobal('fetch', fetchMock)
     await geocodeStructuredAddress({ street: '12 Church St', city: 'Melville', country: 'za' })
     const url = fetchMock.mock.calls[0][0] as string
@@ -168,13 +184,13 @@ describe('geocodeStructuredAddress', () => {
   })
 
   it('omits the country filter for a full country name and relies on the sanity check', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { suggestions: [suggestion()] }))
+      .mockResolvedValueOnce(jsonResponse(200, {
         features: [feature({
           lat: 1, lon: 1, featureType: 'address', countryCode: 'za', countryName: 'South Africa', placeName: 'Melville',
         })],
-      })
-    )
+      }))
     vi.stubGlobal('fetch', fetchMock)
     const result = await geocodeStructuredAddress({ street: '12 Church St', city: 'Melville', country: 'South Africa' })
     const url = fetchMock.mock.calls[0][0] as string
