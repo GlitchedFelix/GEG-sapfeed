@@ -641,3 +641,50 @@ where geocode_failed = true and customer_lat is null
 -- rate, and spot-check a sample of newly-accepted geocode_precise=false
 -- rows' addresses/distances in the Distances tab before trusting them
 -- for payout amounts.
+
+-- ---------------------------------------------------------------------
+-- 15. One-time data fix: re-geocode everything through Mapbox Search Box
+--    (Suggest + Retrieve) instead of Geocoding v6 forward.
+--    lib/geocoding.ts switched its underlying Mapbox endpoint from
+--    /search/geocode/v6/forward to /search/searchbox/v1/{suggest,retrieve}
+--    — geocodeAddress/geocodeStructuredAddress's public signatures didn't
+--    change, but the matches they return can differ (different candidate
+--    ranking, no field-based structured query). Existing
+--    customer_lat/customer_lon/distance_km and store_locations coordinates
+--    were computed by the old endpoint, so every non-manual row needs to
+--    be reset and re-run through the backfill job. Same caveats as
+--    section 13: deploy the code change first and confirm it actually
+--    works before running the reset below, and export a CSV snapshot of
+--    current distance_km values first so the new results can be
+--    spot-checked against the old ones — a systematic offset here would
+--    change real payout amounts.
+-- ---------------------------------------------------------------------
+
+-- Run these first and review the row counts before committing to the reset.
+select count(*) as deliveries_to_reset from deliveries where distance_manual = false;
+select count(*) as stores_to_reset from store_locations where geocode_query is distinct from 'manual';
+
+-- distance_manual rows are user-entered overrides — never reset those.
+update deliveries
+set customer_lat = null,
+    customer_lon = null,
+    distance_km = null,
+    geocode_failed = false,
+    distance_failed = false,
+    distance_fail_reason = null,
+    ibt_origin_backfilled = false
+where distance_manual = false;
+
+-- geocode_query = 'manual' rows are user-entered store coordinates (Settings
+-- tab) — never reset those. Everything else gets re-geocoded fresh via
+-- Suggest+Retrieve next time it's looked up (both API routes already
+-- re-geocode a store on a null lat/lon hit, so no code change is needed).
+update store_locations
+set lat = null,
+    lon = null,
+    geocoded_at = null,
+    geocode_query = null
+where geocode_query is distinct from 'manual';
+
+-- Then repeatedly click "Backfill distances" in the Distances tab (or let
+-- its polling loop run) until it reports exhausted: true.
